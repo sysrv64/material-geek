@@ -2,11 +2,21 @@ mod gallery;
 
 use gallery::GalleryApp;
 use log::{error, info};
+#[cfg(target_os = "android")]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
+
+#[cfg(target_os = "android")]
+use std::sync::atomic::Ordering;
+#[cfg(target_os = "android")]
+use std::time::Duration;
+
+#[cfg(target_os = "android")]
+static LOOP_ALIVE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
@@ -73,10 +83,8 @@ impl ApplicationHandler for Handler {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                #[cfg(not(target_os = "android"))]
+                info!("close requested, ending event loop for clean recreation");
                 _event_loop.exit();
-                #[cfg(target_os = "android")]
-                info!("close requested, keeping loop alive for activity reuse");
             }
             WindowEvent::Resized(size) => {
                 self.app.resize(size.width, size.height);
@@ -134,6 +142,43 @@ pub fn run_desktop() {
 }
 
 #[cfg(target_os = "android")]
+fn build_event_loop(
+    app: AndroidApp,
+) -> Option<EventLoop<()>> {
+    let mut builder = EventLoop::builder();
+    builder.with_android_app(app.clone());
+    match builder.build() {
+        Ok(event_loop) => Some(event_loop),
+        Err(winit::error::EventLoopError::RecreationAttempt) => {
+            error!("previous event loop still alive, waiting for clean exit");
+            for _ in 0..200 {
+                std::thread::sleep(Duration::from_millis(25));
+                if !LOOP_ALIVE.load(Ordering::SeqCst) {
+                    let mut retry = EventLoop::builder();
+                    retry.with_android_app(app);
+                    match retry.build() {
+                        Ok(event_loop) => {
+                            info!("previous event loop exited, starting fresh loop");
+                            return Some(event_loop);
+                        }
+                        Err(err) => {
+                            error!("event loop rebuild failed: {err:?}");
+                            return None;
+                        }
+                    }
+                }
+            }
+            error!("previous event loop did not exit in time, android thread ending");
+            None
+        }
+        Err(err) => {
+            error!("event loop creation failed: {err:?}");
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     use mg_theme::GeekTheme;
@@ -148,21 +193,14 @@ fn android_main(app: AndroidApp) {
         );
         let _ = std::fs::write(dir.join("material-geek-status.txt"), payload);
     }
-    let mut builder = EventLoop::builder();
-    builder.with_android_app(app);
-    let event_loop = match builder.build() {
-        Ok(event_loop) => event_loop,
-        Err(err) => {
-            error!("event loop creation failed: {err:?}");
-            if matches!(err, winit::error::EventLoopError::RecreationAttempt) {
-                error!("event loop already exists in this process, restarting process");
-                std::process::exit(0);
-            }
-            return;
-        }
+    let Some(event_loop) = build_event_loop(app) else {
+        return;
     };
     let mut handler = Handler::new();
-    match event_loop.run_app(&mut handler) {
+    LOOP_ALIVE.store(true, Ordering::SeqCst);
+    let result = event_loop.run_app(&mut handler);
+    LOOP_ALIVE.store(false, Ordering::SeqCst);
+    match result {
         Ok(()) => info!("event loop returned, ending android thread"),
         Err(err) => error!("event loop exited with error: {err:?}"),
     }

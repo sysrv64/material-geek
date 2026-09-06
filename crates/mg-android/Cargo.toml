@@ -50,3 +50,6 @@ value = "mg_android"
 [[package.metadata.android.application.activity.intent_filter]]
 actions = ["android.intent.action.MAIN"]
 categories = ["android.intent.category.LAUNCHER"]
+
+[patch.crates-io]
+winit = { path = "../../vendor/winit" }

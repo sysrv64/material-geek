@@ -28,3 +28,4 @@ mg-motion = { path = "crates/mg-motion" }
 mg-theme = { path = "crates/mg-theme" }
 mg-components = { path = "crates/mg-components" }
 mg-render = { path = "crates/mg-render" }
+
