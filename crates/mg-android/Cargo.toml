@@ -7,16 +7,20 @@ repository = "https://github.com/sysrv64/material-geek"
 rust-version = "1.86"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "mg-android-desktop"
+path = "src/main.rs"
 
 [workspace]
 
 [dependencies]
 mg-motion = { path = "../mg-motion" }
 mg-theme = { path = "../mg-theme" }
-
-[target.'cfg(target_os = "android")'.dependencies]
-android-activity = { version = "0.6", features = ["native-activity"] }
+pollster = "1"
+wgpu = "30"
+winit = { version = "0.30", features = ["android-native-activity"] }
 
 [package.metadata.android]
 use_aapt2 = true

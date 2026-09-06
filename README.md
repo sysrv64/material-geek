@@ -14,7 +14,7 @@ Verified baseline: Jetpack `material3:1.5.0-alpha25` (stable `1.4.0`) + JetBrain
 | `mg-motion`: Dynamic Motion with analytic springs + cubic-bezier + expressive/standard MotionScheme + retarget | DONE, covered by physics tests |
 | `mg-theme`: light/dark x expressive/standard | DONE |
 | `mg-components`: 41 of 41 components as headless Props/State | DONE, API surface |
-| `mg-android`: NativeActivity shell (`android-activity 0.6`) running the headless core on device, packaged by `cargo-apk2` | DONE, APK built by CI |
+| `mg-android`: winit plus wgpu shell rendering the dark expressive theme with a spring-driven indicator, packaged by `cargo-apk2` | DONE, debug and signed release APKs built by CI |
 | Render adapter with real pixels (desktop + Android surface) | TODO in v0.2 |
 | Dynamic-color HCT, shape morph, text layout | TODO in v0.2 |
 
@@ -58,7 +58,9 @@ s.retarget(0.0);
 
 ## Android APK
 
-Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. CI installs Android NDK r29 (`29.0.14206865`), builds with `cargo apk2 build`, and uploads the APK as the `material-geek-apk` artifact. On launch the shell runs the headless self-test (theme resolve plus 240 spring steps) and writes `material-geek-status.txt` to the app internal data directory. Pixel rendering arrives in v0.2.
+Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders the dark expressive surface color with a primary-colored circle that bounces on the expressive default spatial spring, retargeting at each settled end. The same scene runs on Linux desktop via the `mg-android-desktop` binary.
+
+CI builds two artifacts on every `main` push: `material-geek-apk` (debug, auto-generated debug key) and `material-geek-apk-release` (release, signed with the repo keystore and verified with `apksigner verify --print-certs`). Release signing keys live only in GitHub Secrets (`MATERIAL_GEEK_KEYSTORE_BASE64`, `MATERIAL_GEEK_KEYSTORE_PASSWORD`, plus reserved `MATERIAL_GEEK_KEY_ALIAS` and `MATERIAL_GEEK_KEY_PASSWORD`); no key material is committed.
 
 ## Dependencies
 

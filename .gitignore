@@ -2,6 +2,8 @@ target/
 *.apk
 *.aab
 *.so
+*.keystore
+*.jks
 jniLibs/
 .DS_Store
 .idea/
