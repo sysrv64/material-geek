@@ -9,6 +9,8 @@ rust-version = "1.86"
 [lib]
 crate-type = ["cdylib"]
 
+[workspace]
+
 [dependencies]
 mg-motion = { path = "../mg-motion" }
 mg-theme = { path = "../mg-theme" }
