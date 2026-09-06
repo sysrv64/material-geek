@@ -34,7 +34,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: material-geek-apk
-          path: crates/mg-android/target/**/*.apk
+          path: |
+            crates/mg-android/target/**/*.apk
+            !crates/mg-android/target/**/*unaligned*
 
   apk-release:
     runs-on: ubuntu-latest
@@ -66,7 +68,7 @@ jobs:
         run: cargo apk2 build --release
       - name: Verify release signature
         run: |
-          APK=$(find crates/mg-android/target -name '*.apk' | head -n 1)
+          APK=$(find crates/mg-android/target -name '*.apk' ! -name '*unaligned*' | head -n 1)
           echo "APK=$APK"
           test -n "$APK"
           "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
@@ -74,4 +76,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: material-geek-apk-release
-          path: crates/mg-android/target/**/*.apk
+          path: |
+            crates/mg-android/target/**/*.apk
+            !crates/mg-android/target/**/*unaligned*
