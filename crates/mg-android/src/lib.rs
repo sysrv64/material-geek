@@ -92,7 +92,9 @@ impl ApplicationHandler for Handler {
             WindowEvent::RedrawRequested => {
                 self.app.frame();
             }
-            WindowEvent::Touch(Touch { phase, location, .. }) => {
+            WindowEvent::Touch(Touch {
+                phase, location, ..
+            }) => {
                 let x = location.x as f32;
                 let y = location.y as f32;
                 match phase {

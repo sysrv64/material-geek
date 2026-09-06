@@ -1,9 +1,9 @@
 use mg_components::ComponentId;
 use mg_motion::{cubic_bezier_y, DynamicSpring, MotionScheme, Tempo, Track};
 use mg_render::{
-    m3_text_style, M3_BODY_LARGE, M3_BODY_MEDIUM, M3_BODY_SMALL, M3_DISPLAY_SMALL,
-    M3_HEADLINE_SMALL, M3_LABEL_LARGE, M3_LABEL_MEDIUM, M3_LABEL_SMALL, M3_TITLE_LARGE,
-    M3_TITLE_MEDIUM, M3_TITLE_SMALL, TypeStyle, TextStyle, UiRenderer,
+    m3_text_style, TextStyle, TypeStyle, UiRenderer, M3_BODY_LARGE, M3_BODY_MEDIUM, M3_BODY_SMALL,
+    M3_DISPLAY_SMALL, M3_HEADLINE_SMALL, M3_LABEL_LARGE, M3_LABEL_MEDIUM, M3_LABEL_SMALL,
+    M3_TITLE_LARGE, M3_TITLE_MEDIUM, M3_TITLE_SMALL,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -36,7 +36,12 @@ fn with_alpha(c: [f32; 4], a: f32) -> [f32; 4] {
 }
 
 fn mix(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, 1.0]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        1.0,
+    ]
 }
 
 fn ts(t: TypeStyle, color: [f32; 4], u: f32) -> TextStyle {
@@ -351,9 +356,15 @@ impl Gallery {
             self.drag_slider_to(x);
             return;
         }
-        let bounded = !matches!(action, Action::Switch(_) | Action::Check(_) | Action::Radio(_));
+        let bounded = !matches!(
+            action,
+            Action::Switch(_) | Action::Check(_) | Action::Radio(_)
+        );
         self.spawn_ripple(rect, x, y, bounded, ink);
-        self.pressed = Some(Pressed { action, start: self.t });
+        self.pressed = Some(Pressed {
+            action,
+            start: self.t,
+        });
         if let Action::Button(id) = action {
             self.morph_key = id;
             self.morph.retarget(1.0);
@@ -513,14 +524,23 @@ impl Gallery {
             if r.rect != rect {
                 continue;
             }
-            let grow =
-                cubic_bezier_y(((now - r.start) / 0.225).clamp(0.0, 1.0), 0.2, 0.0, 0.0, 1.0);
+            let grow = cubic_bezier_y(
+                ((now - r.start) / 0.225).clamp(0.0, 1.0),
+                0.2,
+                0.0,
+                0.0,
+                1.0,
+            );
             let end_r = if r.bounded {
                 (rect.w * rect.w + rect.h * rect.h).sqrt() * 0.5 + 10.0 * u
             } else {
                 20.0 * u
             };
-            let start_r = if r.bounded { 0.3 * rect.w.max(rect.h) } else { 0.0 };
+            let start_r = if r.bounded {
+                0.3 * rect.w.max(rect.h)
+            } else {
+                0.0
+            };
             let radius = lerp(start_r, end_r, grow);
             let mut a = ((now - r.start) / 0.075).clamp(0.0, 1.0);
             if let Some(t0) = r.released {
@@ -536,7 +556,14 @@ impl Gallery {
 
     fn layer(&self, ui: &mut UiRenderer, action: Action, rect: Rect, radius: f32, ink: [f32; 4]) {
         if self.is_pressed(action) {
-            ui.rect(rect.x, rect.y, rect.w, rect.h, with_alpha(ink, 0.10), r4(radius));
+            ui.rect(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                with_alpha(ink, 0.10),
+                r4(radius),
+            );
         }
     }
 
@@ -556,7 +583,13 @@ impl Gallery {
 
     fn elev_dp(&self, action: Action) -> f32 {
         if let Some(p) = self.pressed.filter(|p| p.action == action) {
-            let f = cubic_bezier_y(((self.t - p.start) / 0.12).clamp(0.0, 1.0), 0.2, 0.0, 0.0, 1.0);
+            let f = cubic_bezier_y(
+                ((self.t - p.start) / 0.12).clamp(0.0, 1.0),
+                0.2,
+                0.0,
+                0.0,
+                1.0,
+            );
             return 2.0 + 4.0 * f;
         }
         if let Some((_, t0)) = self.last_release.filter(|(a, _)| *a == action) {
@@ -600,8 +633,21 @@ impl Gallery {
             ui.text(&name, pad, y, ts(M3_LABEL_MEDIUM, self.pal.sub, u));
             let body_h = Self::body_height(id, u);
             let card_y = y + 24.0 * u;
-            ui.rect(card_x, card_y, card_w, body_h + 32.0 * u, self.pal.card, r4(12.0 * u));
-            self.draw_body(ui, id, card_x + 16.0 * u, card_y + 16.0 * u, card_w - 32.0 * u);
+            ui.rect(
+                card_x,
+                card_y,
+                card_w,
+                body_h + 32.0 * u,
+                self.pal.card,
+                r4(12.0 * u),
+            );
+            self.draw_body(
+                ui,
+                id,
+                card_x + 16.0 * u,
+                card_y + 16.0 * u,
+                card_w - 32.0 * u,
+            );
             y = card_y + body_h + 32.0 * u + 20.0 * u;
         }
         self.content_h = y + self.scroll + 16.0 * u;
@@ -619,9 +665,30 @@ impl Gallery {
             18.0 * u,
             ts(M3_TITLE_LARGE, self.pal.text, u),
         );
-        self.icon_button(ui, 101, width - 88.0 * u, 12.0 * u, "search", IconBtn::Standard);
-        self.icon_button(ui, 102, width - 44.0 * u, 12.0 * u, "more_vert", IconBtn::Standard);
-        ui.rect(0.0, 63.0 * u, width, 1.0 * u, self.pal.outline_variant, r4(0.5 * u));
+        self.icon_button(
+            ui,
+            101,
+            width - 88.0 * u,
+            12.0 * u,
+            "search",
+            IconBtn::Standard,
+        );
+        self.icon_button(
+            ui,
+            102,
+            width - 44.0 * u,
+            12.0 * u,
+            "more_vert",
+            IconBtn::Standard,
+        );
+        ui.rect(
+            0.0,
+            63.0 * u,
+            width,
+            1.0 * u,
+            self.pal.outline_variant,
+            r4(0.5 * u),
+        );
     }
 
     fn body_height(id: ComponentId, u: f32) -> f32 {
@@ -705,7 +772,14 @@ impl Gallery {
             h * 0.5
         };
         if variant == Btn::Elevated {
-            ui.rect(x, y + 2.0 * u, w, h, with_alpha(self.pal.bg, 0.6), r4(radius));
+            ui.rect(
+                x,
+                y + 2.0 * u,
+                w,
+                h,
+                with_alpha(self.pal.bg, 0.6),
+                r4(radius),
+            );
         }
         if let Some(f) = fill {
             ui.rect(x, y, w, h, f, r4(radius));
@@ -718,7 +792,12 @@ impl Gallery {
         if let Some(name) = icon {
             icon_c(ui, name, x + pad_h + 9.0 * u, y + h * 0.5, 18.0 * u, ink);
         }
-        ui.text(label, x + pad_h + icon_w, y + h * 0.5 - style.line_h * 0.5, style);
+        ui.text(
+            label,
+            x + pad_h + icon_w,
+            y + h * 0.5 - style.line_h * 0.5,
+            style,
+        );
         self.zone(Action::Button(id), Rect { x, y, w, h }, ink);
         w
     }
@@ -755,7 +834,13 @@ impl Gallery {
         if border {
             ui.stroke(x, y, s, s, self.pal.outline, r4(radius), 1.0 * u);
         }
-        self.layer(ui, Action::Button(id), Rect { x, y, w: s, h: s }, radius, ink);
+        self.layer(
+            ui,
+            Action::Button(id),
+            Rect { x, y, w: s, h: s },
+            radius,
+            ink,
+        );
         self.draw_ripples(ui, Rect { x, y, w: s, h: s });
         icon_c(ui, icon, x + s * 0.5, y + s * 0.5, 24.0 * u, ink);
         self.zone(Action::Button(id), Rect { x, y, w: s, h: s }, ink);
@@ -774,12 +859,47 @@ impl Gallery {
         let radius = if size >= 56.0 * u { 16.0 * u } else { 12.0 * u };
         let e = self.elev_dp(action) * u;
         let ink = self.pal.on_primary_container;
-        ui.rect(x, y + e, size, size, with_alpha(self.pal.bg, 0.7), r4(radius));
+        ui.rect(
+            x,
+            y + e,
+            size,
+            size,
+            with_alpha(self.pal.bg, 0.7),
+            r4(radius),
+        );
         ui.rect(x, y, size, size, self.pal.primary_container, r4(radius));
-        self.layer(ui, action, Rect { x, y, w: size, h: size }, radius, ink);
-        self.draw_ripples(ui, Rect { x, y, w: size, h: size });
+        self.layer(
+            ui,
+            action,
+            Rect {
+                x,
+                y,
+                w: size,
+                h: size,
+            },
+            radius,
+            ink,
+        );
+        self.draw_ripples(
+            ui,
+            Rect {
+                x,
+                y,
+                w: size,
+                h: size,
+            },
+        );
         icon_c(ui, icon, x + size * 0.5, y + size * 0.5, 24.0 * u, ink);
-        self.zone(action, Rect { x, y, w: size, h: size }, ink);
+        self.zone(
+            action,
+            Rect {
+                x,
+                y,
+                w: size,
+                h: size,
+            },
+            ink,
+        );
         size
     }
 
@@ -816,7 +936,12 @@ impl Gallery {
         self.draw_ripples(ui, rect);
         let style = ts(M3_LABEL_LARGE, ink, u);
         let tw = ui.text_width(label, style.px, style.medium, style.tracking_em);
-        ui.text(label, x + (w - tw) * 0.5, y + h * 0.5 - style.line_h * 0.5, style);
+        ui.text(
+            label,
+            x + (w - tw) * 0.5,
+            y + h * 0.5 - style.line_h * 0.5,
+            style,
+        );
         self.zone(Action::Group(i), Rect { x, y, w, h }, self.pal.text);
     }
 
@@ -827,11 +952,30 @@ impl Gallery {
         let cf = self.check_draw[i].x;
         let bx = x + 11.0 * u;
         let by = ry + 11.0 * u;
-        let hit = Rect { x, y: ry, w: 40.0 * u, h: 40.0 * u };
-        self.layer_circle(ui, Action::Check(i), x + 20.0 * u, ry + 20.0 * u, 20.0 * u, self.pal.text);
+        let hit = Rect {
+            x,
+            y: ry,
+            w: 40.0 * u,
+            h: 40.0 * u,
+        };
+        self.layer_circle(
+            ui,
+            Action::Check(i),
+            x + 20.0 * u,
+            ry + 20.0 * u,
+            20.0 * u,
+            self.pal.text,
+        );
         self.draw_ripples(ui, hit);
         if ca > 0.0 {
-            ui.rect(bx, by, 18.0 * u, 18.0 * u, with_alpha(self.pal.primary, ca), r4(2.0 * u));
+            ui.rect(
+                bx,
+                by,
+                18.0 * u,
+                18.0 * u,
+                with_alpha(self.pal.primary, ca),
+                r4(2.0 * u),
+            );
         }
         if ca < 1.0 {
             ui.stroke(
@@ -845,7 +989,14 @@ impl Gallery {
             );
         }
         if st == 2 {
-            ui.rect(bx + 4.0 * u, by + 8.0 * u, 10.0 * u, 2.0 * u, with_alpha(self.pal.on_primary, ca), r4(1.0 * u));
+            ui.rect(
+                bx + 4.0 * u,
+                by + 8.0 * u,
+                10.0 * u,
+                2.0 * u,
+                with_alpha(self.pal.on_primary, ca),
+                r4(1.0 * u),
+            );
         } else if cf > 0.02 {
             icon_c(
                 ui,
@@ -857,10 +1008,20 @@ impl Gallery {
             );
             ui.clip_last([bx, by, 18.0 * u, 18.0 * u]);
         }
-        ui.text(label, x + 48.0 * u, ry + 8.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
+        ui.text(
+            label,
+            x + 48.0 * u,
+            ry + 8.0 * u,
+            ts(M3_BODY_LARGE, self.pal.text, u),
+        );
         self.zone(
             Action::Check(i),
-            Rect { x, y: ry, w: 220.0 * u, h: 40.0 * u },
+            Rect {
+                x,
+                y: ry,
+                w: 220.0 * u,
+                h: 40.0 * u,
+            },
             self.pal.text,
         );
     }
@@ -876,10 +1037,33 @@ impl Gallery {
             ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.primary, r4(16.0 * u));
         } else {
             ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.card_hi, r4(16.0 * u));
-            ui.stroke(x, ty, 52.0 * u, 32.0 * u, self.pal.outline, r4(16.0 * u), 2.0 * u);
+            ui.stroke(
+                x,
+                ty,
+                52.0 * u,
+                32.0 * u,
+                self.pal.outline,
+                r4(16.0 * u),
+                2.0 * u,
+            );
         }
-        self.layer_circle(ui, Action::Switch(i), x + 26.0 * u, cy, 20.0 * u, self.pal.text);
-        self.draw_ripples(ui, Rect { x, y: ry, w: 52.0 * u, h: 44.0 * u });
+        self.layer_circle(
+            ui,
+            Action::Switch(i),
+            x + 26.0 * u,
+            cy,
+            20.0 * u,
+            self.pal.text,
+        );
+        self.draw_ripples(
+            ui,
+            Rect {
+                x,
+                y: ry,
+                w: 52.0 * u,
+                h: 44.0 * u,
+            },
+        );
         let size = if pressed {
             28.0 * u
         } else {
@@ -896,10 +1080,20 @@ impl Gallery {
         };
         let thumb = mix(self.pal.outline, self.pal.on_primary, anim);
         ui.circle(x + cx, cy, size * 0.5, thumb);
-        ui.text(label, x + 68.0 * u, ry + 10.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
+        ui.text(
+            label,
+            x + 68.0 * u,
+            ry + 10.0 * u,
+            ts(M3_BODY_LARGE, self.pal.text, u),
+        );
         self.zone(
             Action::Switch(i),
-            Rect { x, y: ry, w: 120.0 * u, h: 44.0 * u },
+            Rect {
+                x,
+                y: ry,
+                w: 120.0 * u,
+                h: 44.0 * u,
+            },
             self.pal.text,
         );
     }
@@ -909,19 +1103,41 @@ impl Gallery {
         let sel = self.radio == i;
         let cx = x + 20.0 * u;
         let cy = ry + 20.0 * u;
-        let ring = if sel { self.pal.primary } else { self.pal.outline };
+        let ring = if sel {
+            self.pal.primary
+        } else {
+            self.pal.outline
+        };
         self.layer_circle(ui, Action::Radio(i), cx, cy, 20.0 * u, self.pal.text);
-        self.draw_ripples(ui, Rect { x, y: ry, w: 40.0 * u, h: 40.0 * u });
+        self.draw_ripples(
+            ui,
+            Rect {
+                x,
+                y: ry,
+                w: 40.0 * u,
+                h: 40.0 * u,
+            },
+        );
         ui.circle(cx, cy, 10.0 * u, ring);
         ui.circle(cx, cy, 8.0 * u, self.pal.card);
         let dot = self.radio_anim[i].x;
         if dot > 0.02 {
             ui.circle(cx, cy, 6.0 * u * dot, self.pal.primary);
         }
-        ui.text(label, x + 48.0 * u, ry + 8.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
+        ui.text(
+            label,
+            x + 48.0 * u,
+            ry + 8.0 * u,
+            ts(M3_BODY_LARGE, self.pal.text, u),
+        );
         self.zone(
             Action::Radio(i),
-            Rect { x, y: ry, w: 220.0 * u, h: 40.0 * u },
+            Rect {
+                x,
+                y: ry,
+                w: 220.0 * u,
+                h: 40.0 * u,
+            },
             self.pal.text,
         );
     }
@@ -975,7 +1191,14 @@ impl Gallery {
         let tx = x + 8.0 * u + lead_w;
         ui.text(label, tx, y + h * 0.5 - style.line_h * 0.5, style);
         if let Some(ic) = trailing {
-            icon_c(ui, ic, tx + tw + 8.0 * u + 9.0 * u, y + h * 0.5, 18.0 * u, self.pal.sub);
+            icon_c(
+                ui,
+                ic,
+                tx + tw + 8.0 * u + 9.0 * u,
+                y + h * 0.5,
+                18.0 * u,
+                self.pal.sub,
+            );
         }
         self.zone(Action::Chip(i), rect, self.pal.text);
         w
@@ -986,27 +1209,72 @@ impl Gallery {
         match id {
             ComponentId::Button => {
                 let mut bx = x;
-                bx += self.draw_button(ui, 1, bx, y, BtnSpec { label: "Filled", icon: None, variant: Btn::Filled })
-                    + 12.0 * u;
-                bx += self.draw_button(ui, 2, bx, y, BtnSpec { label: "Tonal", icon: None, variant: Btn::Tonal })
-                    + 12.0 * u;
-                self.draw_button(ui, 3, bx, y, BtnSpec { label: "Outlined", icon: None, variant: Btn::Outlined });
+                bx += self.draw_button(
+                    ui,
+                    1,
+                    bx,
+                    y,
+                    BtnSpec {
+                        label: "Filled",
+                        icon: None,
+                        variant: Btn::Filled,
+                    },
+                ) + 12.0 * u;
+                bx += self.draw_button(
+                    ui,
+                    2,
+                    bx,
+                    y,
+                    BtnSpec {
+                        label: "Tonal",
+                        icon: None,
+                        variant: Btn::Tonal,
+                    },
+                ) + 12.0 * u;
+                self.draw_button(
+                    ui,
+                    3,
+                    bx,
+                    y,
+                    BtnSpec {
+                        label: "Outlined",
+                        icon: None,
+                        variant: Btn::Outlined,
+                    },
+                );
                 let mut bx = x;
                 bx += self.draw_button(
                     ui,
                     4,
                     bx,
                     y + 52.0 * u,
-                    BtnSpec { label: "Elevated", icon: None, variant: Btn::Elevated },
+                    BtnSpec {
+                        label: "Elevated",
+                        icon: None,
+                        variant: Btn::Elevated,
+                    },
                 ) + 12.0 * u;
-                bx += self.draw_button(ui, 5, bx, y + 52.0 * u, BtnSpec { label: "Text", icon: None, variant: Btn::Text })
-                    + 12.0 * u;
+                bx += self.draw_button(
+                    ui,
+                    5,
+                    bx,
+                    y + 52.0 * u,
+                    BtnSpec {
+                        label: "Text",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                ) + 12.0 * u;
                 self.draw_button(
                     ui,
                     6,
                     bx,
                     y + 52.0 * u,
-                    BtnSpec { label: "Favorite", icon: Some("favorite"), variant: Btn::Filled },
+                    BtnSpec {
+                        label: "Favorite",
+                        icon: Some("favorite"),
+                        variant: Btn::Filled,
+                    },
                 );
             }
             ComponentId::IconButton => {
@@ -1018,7 +1286,14 @@ impl Gallery {
                 ];
                 let icons = ["favorite", "add", "settings", "close"];
                 for (i, v) in variants.into_iter().enumerate() {
-                    self.icon_button(ui, 10 + i as u32, x + i as f32 * 52.0 * u, y + 4.0 * u, icons[i], v);
+                    self.icon_button(
+                        ui,
+                        10 + i as u32,
+                        x + i as f32 * 52.0 * u,
+                        y + 4.0 * u,
+                        icons[i],
+                        v,
+                    );
                 }
             }
             ComponentId::Fab => {
@@ -1032,13 +1307,37 @@ impl Gallery {
                 let tw = ui.text_width("Compose", style.px, style.medium, style.tracking_em);
                 let fw = 16.0 * u + 24.0 * u + 8.0 * u + tw + 20.0 * u;
                 let e = self.elev_dp(Action::Button(21)) * u;
-                let rect = Rect { x, y, w: fw, h: 56.0 * u };
-                ui.rect(x, y + e, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(16.0 * u));
+                let rect = Rect {
+                    x,
+                    y,
+                    w: fw,
+                    h: 56.0 * u,
+                };
+                ui.rect(
+                    x,
+                    y + e,
+                    fw,
+                    56.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(16.0 * u),
+                );
                 ui.rect(x, y, fw, 56.0 * u, self.pal.primary_container, r4(16.0 * u));
                 self.layer(ui, Action::Button(21), rect, 16.0 * u, ink);
                 self.draw_ripples(ui, rect);
-                icon_c(ui, "edit", x + 16.0 * u + 12.0 * u, y + 28.0 * u, 24.0 * u, ink);
-                ui.text("Compose", x + 48.0 * u, y + 28.0 * u - style.line_h * 0.5, style);
+                icon_c(
+                    ui,
+                    "edit",
+                    x + 16.0 * u + 12.0 * u,
+                    y + 28.0 * u,
+                    24.0 * u,
+                    ink,
+                );
+                ui.text(
+                    "Compose",
+                    x + 48.0 * u,
+                    y + 28.0 * u - style.line_h * 0.5,
+                    style,
+                );
                 self.zone(Action::Button(21), rect, ink);
             }
             ComponentId::FabMenu => {
@@ -1046,7 +1345,12 @@ impl Gallery {
                     let items = [("mail", "Email"), ("call", "Call"), ("send", "Send")];
                     for (i, (ic, lb)) in items.into_iter().enumerate() {
                         let iy = y + i as f32 * 48.0 * u;
-                        ui.circle(x + 20.0 * u, iy + 24.0 * u, 20.0 * u, self.pal.secondary_container);
+                        ui.circle(
+                            x + 20.0 * u,
+                            iy + 24.0 * u,
+                            20.0 * u,
+                            self.pal.secondary_container,
+                        );
                         icon_c(
                             ui,
                             ic,
@@ -1055,7 +1359,12 @@ impl Gallery {
                             24.0 * u,
                             self.pal.on_secondary_container,
                         );
-                        ui.text(lb, x + 52.0 * u, iy + 12.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
+                        ui.text(
+                            lb,
+                            x + 52.0 * u,
+                            iy + 12.0 * u,
+                            ts(M3_BODY_LARGE, self.pal.text, u),
+                        );
                     }
                 }
                 let fy = y + 156.0 * u;
@@ -1071,29 +1380,106 @@ impl Gallery {
             ComponentId::SplitButton => {
                 let h = 40.0 * u;
                 let ink = self.pal.on_primary;
-                let fm = if self.morph_key == 60 { self.morph.x } else { 0.0 };
-                let fo = if self.morph_key == 61 { self.morph.x } else { 0.0 };
+                let fm = if self.morph_key == 60 {
+                    self.morph.x
+                } else {
+                    0.0
+                };
+                let fo = if self.morph_key == 61 {
+                    self.morph.x
+                } else {
+                    0.0
+                };
                 let rm = lerp(20.0 * u, 8.0 * u, fm);
                 let ro = lerp(20.0 * u, 8.0 * u, fo);
                 ui.rect(x, y, 132.0 * u, h, self.pal.primary, [rm, 0.0, 0.0, rm]);
-                ui.rect(x + 132.0 * u, y, 52.0 * u, h, self.pal.primary, [0.0, ro, ro, 0.0]);
-                ui.rect(x + 131.0 * u, y + 10.0 * u, 1.0 * u, 20.0 * u, ink, r4(0.5 * u));
+                ui.rect(
+                    x + 132.0 * u,
+                    y,
+                    52.0 * u,
+                    h,
+                    self.pal.primary,
+                    [0.0, ro, ro, 0.0],
+                );
+                ui.rect(
+                    x + 131.0 * u,
+                    y + 10.0 * u,
+                    1.0 * u,
+                    20.0 * u,
+                    ink,
+                    r4(0.5 * u),
+                );
                 let style = ts(M3_LABEL_LARGE, ink, u);
                 let ltw = ui.text_width("Send", style.px, style.medium, style.tracking_em);
-                ui.text("Send", x + (132.0 * u - ltw) * 0.5, y + h * 0.5 - style.line_h * 0.5, style);
+                ui.text(
+                    "Send",
+                    x + (132.0 * u - ltw) * 0.5,
+                    y + h * 0.5 - style.line_h * 0.5,
+                    style,
+                );
                 icon_c(ui, "expand_more", x + 158.0 * u, y + h * 0.5, 24.0 * u, ink);
-                self.layer(ui, Action::Button(60), Rect { x, y, w: 132.0 * u, h }, rm, ink);
-                self.draw_ripples(ui, Rect { x, y, w: 132.0 * u, h });
+                self.layer(
+                    ui,
+                    Action::Button(60),
+                    Rect {
+                        x,
+                        y,
+                        w: 132.0 * u,
+                        h,
+                    },
+                    rm,
+                    ink,
+                );
+                self.draw_ripples(
+                    ui,
+                    Rect {
+                        x,
+                        y,
+                        w: 132.0 * u,
+                        h,
+                    },
+                );
                 self.layer(
                     ui,
                     Action::Button(61),
-                    Rect { x: x + 132.0 * u, y, w: 52.0 * u, h },
+                    Rect {
+                        x: x + 132.0 * u,
+                        y,
+                        w: 52.0 * u,
+                        h,
+                    },
                     ro,
                     ink,
                 );
-                self.draw_ripples(ui, Rect { x: x + 132.0 * u, y, w: 52.0 * u, h });
-                self.zone(Action::Button(60), Rect { x, y, w: 132.0 * u, h }, ink);
-                self.zone(Action::Button(61), Rect { x: x + 132.0 * u, y, w: 52.0 * u, h }, ink);
+                self.draw_ripples(
+                    ui,
+                    Rect {
+                        x: x + 132.0 * u,
+                        y,
+                        w: 52.0 * u,
+                        h,
+                    },
+                );
+                self.zone(
+                    Action::Button(60),
+                    Rect {
+                        x,
+                        y,
+                        w: 132.0 * u,
+                        h,
+                    },
+                    ink,
+                );
+                self.zone(
+                    Action::Button(61),
+                    Rect {
+                        x: x + 132.0 * u,
+                        y,
+                        w: 52.0 * u,
+                        h,
+                    },
+                    ink,
+                );
             }
             ComponentId::ButtonGroup => {
                 let labels = ["Day", "Week", "Month"];
@@ -1115,16 +1501,38 @@ impl Gallery {
             }
             ComponentId::Card => {
                 let e = self.elev_dp(Action::Button(30)) * u;
-                ui.rect(x, y + e, w, 140.0 * u, with_alpha(self.pal.bg, 0.7), r4(12.0 * u));
+                ui.rect(
+                    x,
+                    y + e,
+                    w,
+                    140.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(12.0 * u),
+                );
                 ui.rect(x, y, w, 140.0 * u, self.pal.card_hi, r4(12.0 * u));
-                ui.text("Card headline", x + 16.0 * u, y + 16.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
+                ui.text(
+                    "Card headline",
+                    x + 16.0 * u,
+                    y + 16.0 * u,
+                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                );
                 ui.text(
                     "Supporting copy sits here and wraps the idea.",
                     x + 16.0 * u,
                     y + 44.0 * u,
                     ts(M3_BODY_MEDIUM, self.pal.sub, u),
                 );
-                self.draw_button(ui, 30, x + 16.0 * u, y + 88.0 * u, BtnSpec { label: "Action", icon: None, variant: Btn::Text });
+                self.draw_button(
+                    ui,
+                    30,
+                    x + 16.0 * u,
+                    y + 88.0 * u,
+                    BtnSpec {
+                        label: "Action",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
             }
             ComponentId::Checkbox => {
                 let labels = ["Unchecked", "Checked", "Indeterminate"];
@@ -1149,7 +1557,14 @@ impl Gallery {
                 ui.text(&pct, x, y, ts(M3_LABEL_LARGE, self.pal.sub, u));
                 let ty = y + 56.0 * u;
                 let bw = w;
-                ui.rect(x, ty - 8.0 * u, bw, 16.0 * u, self.pal.secondary_container, r4(8.0 * u));
+                ui.rect(
+                    x,
+                    ty - 8.0 * u,
+                    bw,
+                    16.0 * u,
+                    self.pal.secondary_container,
+                    r4(8.0 * u),
+                );
                 let pressed = self.slider_drag;
                 let tw = if pressed {
                     2.0 * u
@@ -1164,20 +1579,53 @@ impl Gallery {
                 if sx > tx + gap {
                     ui.circle(sx, ty, 2.0 * u, self.pal.primary);
                 }
-                ui.rect(tx - tw * 0.5, ty - 22.0 * u, tw, 44.0 * u, self.pal.primary, r4(tw * 0.5));
+                ui.rect(
+                    tx - tw * 0.5,
+                    ty - 22.0 * u,
+                    tw,
+                    44.0 * u,
+                    self.pal.primary,
+                    r4(tw * 0.5),
+                );
                 self.zone(
                     Action::Slider,
-                    Rect { x, y: y + 32.0 * u, w, h: 48.0 * u },
+                    Rect {
+                        x,
+                        y: y + 32.0 * u,
+                        w,
+                        h: 48.0 * u,
+                    },
                     self.pal.primary,
                 );
             }
             ComponentId::ProgressIndicator => {
                 ui.rect(x, y + 2.0 * u, w, 4.0 * u, self.pal.card_hi, r4(2.0 * u));
-                ui.rect(x, y + 2.0 * u, (w * self.slider).max(4.0 * u), 4.0 * u, self.pal.primary, r4(2.0 * u));
+                ui.rect(
+                    x,
+                    y + 2.0 * u,
+                    (w * self.slider).max(4.0 * u),
+                    4.0 * u,
+                    self.pal.primary,
+                    r4(2.0 * u),
+                );
                 ui.circle(x + w - 6.0 * u, y + 4.0 * u, 2.0 * u, self.pal.primary);
                 let pos = (self.t * 0.5 % 1.3) - 0.15;
-                ui.rect(x + w * pos, y + 16.0 * u, w * 0.3, 4.0 * u, self.pal.primary, r4(2.0 * u));
-                self.arc(ui, x + 24.0 * u, y + 52.0 * u, 18.0 * u, -90.0, self.slider * 360.0);
+                ui.rect(
+                    x + w * pos,
+                    y + 16.0 * u,
+                    w * 0.3,
+                    4.0 * u,
+                    self.pal.primary,
+                    r4(2.0 * u),
+                );
+                self.arc(
+                    ui,
+                    x + 24.0 * u,
+                    y + 52.0 * u,
+                    18.0 * u,
+                    -90.0,
+                    self.slider * 360.0,
+                );
                 let start = (self.t * 300.0) % 360.0;
                 self.arc(ui, x + 84.0 * u, y + 52.0 * u, 18.0 * u, start, 270.0);
                 ui.text(
@@ -1212,7 +1660,14 @@ impl Gallery {
                 self.draw_chip(ui, 1, x, y + 6.0 * u, "Filter", (lead, None));
             }
             ComponentId::InputChip => {
-                self.draw_chip(ui, 2, x, y + 6.0 * u, "Input", (Some("tune"), Some("close")));
+                self.draw_chip(
+                    ui,
+                    2,
+                    x,
+                    y + 6.0 * u,
+                    "Input",
+                    (Some("tune"), Some("close")),
+                );
             }
             ComponentId::SuggestionChip => {
                 self.draw_chip(ui, 3, x, y + 6.0 * u, "Suggest", (None, None));
@@ -1220,9 +1675,23 @@ impl Gallery {
             ComponentId::Dialog => {
                 let dw = 340.0 * u.min(w);
                 let dh = 200.0 * u;
-                ui.rect(x, y + 4.0 * u, dw, dh, with_alpha(self.pal.bg, 0.7), r4(28.0 * u));
+                ui.rect(
+                    x,
+                    y + 4.0 * u,
+                    dw,
+                    dh,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(28.0 * u),
+                );
                 ui.rect(x, y, dw, dh, self.pal.card_hi, r4(28.0 * u));
-                icon_c(ui, "delete", x + dw * 0.5, y + 32.0 * u, 24.0 * u, self.pal.error);
+                icon_c(
+                    ui,
+                    "delete",
+                    x + dw * 0.5,
+                    y + 32.0 * u,
+                    24.0 * u,
+                    self.pal.error,
+                );
                 text_c(
                     ui,
                     "Delete project?",
@@ -1238,30 +1707,90 @@ impl Gallery {
                     ts(M3_BODY_MEDIUM, self.pal.sub, u),
                 );
                 let st = ts(M3_LABEL_LARGE, self.pal.primary, u);
-                let w_c = 24.0 * u + ui.text_width("Cancel", st.px, st.medium, st.tracking_em) + 24.0 * u;
-                let w_d = 24.0 * u + ui.text_width("Delete", st.px, st.medium, st.tracking_em) + 24.0 * u;
+                let w_c =
+                    24.0 * u + ui.text_width("Cancel", st.px, st.medium, st.tracking_em) + 24.0 * u;
+                let w_d =
+                    24.0 * u + ui.text_width("Delete", st.px, st.medium, st.tracking_em) + 24.0 * u;
                 let bx = x + dw - w_c - w_d - 12.0 * u;
-                self.draw_button(ui, 31, bx, y + 148.0 * u, BtnSpec { label: "Cancel", icon: None, variant: Btn::Text });
+                self.draw_button(
+                    ui,
+                    31,
+                    bx,
+                    y + 148.0 * u,
+                    BtnSpec {
+                        label: "Cancel",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
                 self.draw_button(
                     ui,
                     32,
                     bx + w_c + 12.0 * u,
                     y + 148.0 * u,
-                    BtnSpec { label: "Delete", icon: None, variant: Btn::Text },
+                    BtnSpec {
+                        label: "Delete",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
                 );
             }
             ComponentId::BottomSheet => {
                 ui.rect(x, y, w, 176.0 * u, self.pal.card_hi, r4(28.0 * u));
-                ui.rect(x + w * 0.5 - 16.0 * u, y + 8.0 * u, 32.0 * u, 4.0 * u, self.pal.outline, r4(2.0 * u));
-                let items = [("share", "Share"), ("link", "Copy link"), ("delete", "Remove")];
+                ui.rect(
+                    x + w * 0.5 - 16.0 * u,
+                    y + 8.0 * u,
+                    32.0 * u,
+                    4.0 * u,
+                    self.pal.outline,
+                    r4(2.0 * u),
+                );
+                let items = [
+                    ("share", "Share"),
+                    ("link", "Copy link"),
+                    ("delete", "Remove"),
+                ];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 24.0 * u + i as f32 * 48.0 * u;
                     let a = Action::Button(70 + i as u32);
-                    self.layer(ui, a, Rect { x, y: iy, w, h: 48.0 * u }, 0.0, self.pal.text);
-                    self.draw_ripples(ui, Rect { x, y: iy, w, h: 48.0 * u });
+                    self.layer(
+                        ui,
+                        a,
+                        Rect {
+                            x,
+                            y: iy,
+                            w,
+                            h: 48.0 * u,
+                        },
+                        0.0,
+                        self.pal.text,
+                    );
+                    self.draw_ripples(
+                        ui,
+                        Rect {
+                            x,
+                            y: iy,
+                            w,
+                            h: 48.0 * u,
+                        },
+                    );
                     icon_c(ui, ic, x + 28.0 * u, iy + 24.0 * u, 24.0 * u, self.pal.text);
-                    ui.text(lb, x + 56.0 * u, iy + 12.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
-                    self.zone(a, Rect { x, y: iy, w, h: 48.0 * u }, self.pal.text);
+                    ui.text(
+                        lb,
+                        x + 56.0 * u,
+                        iy + 12.0 * u,
+                        ts(M3_BODY_LARGE, self.pal.text, u),
+                    );
+                    self.zone(
+                        a,
+                        Rect {
+                            x,
+                            y: iy,
+                            w,
+                            h: 48.0 * u,
+                        },
+                        self.pal.text,
+                    );
                 }
             }
             ComponentId::NavigationBar => {
@@ -1283,19 +1812,63 @@ impl Gallery {
                         self.pal.sub
                     };
                     if sel {
-                        ui.rect(cx0 + cw * 0.5 - 28.0 * u, y + 12.0 * u, 56.0 * u, 32.0 * u, self.pal.secondary_container, r4(16.0 * u));
+                        ui.rect(
+                            cx0 + cw * 0.5 - 28.0 * u,
+                            y + 12.0 * u,
+                            56.0 * u,
+                            32.0 * u,
+                            self.pal.secondary_container,
+                            r4(16.0 * u),
+                        );
                     }
-                    self.layer(ui, Action::Nav(i), Rect { x: cx0, y, w: cw, h: 80.0 * u }, 12.0 * u, self.pal.text);
-                    self.draw_ripples(ui, Rect { x: cx0, y, w: cw, h: 80.0 * u });
+                    self.layer(
+                        ui,
+                        Action::Nav(i),
+                        Rect {
+                            x: cx0,
+                            y,
+                            w: cw,
+                            h: 80.0 * u,
+                        },
+                        12.0 * u,
+                        self.pal.text,
+                    );
+                    self.draw_ripples(
+                        ui,
+                        Rect {
+                            x: cx0,
+                            y,
+                            w: cw,
+                            h: 80.0 * u,
+                        },
+                    );
                     icon_c(ui, ic, cx0 + cw * 0.5, y + 28.0 * u, 24.0 * u, ink);
-                    let style = ts(M3_LABEL_MEDIUM, if sel { self.pal.text } else { self.pal.sub }, u);
+                    let style = ts(
+                        M3_LABEL_MEDIUM,
+                        if sel { self.pal.text } else { self.pal.sub },
+                        u,
+                    );
                     let tw = ui.text_width(lb, style.px, style.medium, style.tracking_em);
                     ui.text(lb, cx0 + cw * 0.5 - tw * 0.5, y + 50.0 * u, style);
-                    self.zone(Action::Nav(i), Rect { x: cx0, y, w: cw, h: 80.0 * u }, ink);
+                    self.zone(
+                        Action::Nav(i),
+                        Rect {
+                            x: cx0,
+                            y,
+                            w: cw,
+                            h: 80.0 * u,
+                        },
+                        ink,
+                    );
                 }
             }
             ComponentId::NavigationRail => {
-                let items = [("home", "Home"), ("search", "Search"), ("favorite", "Saved"), ("person", "Me")];
+                let items = [
+                    ("home", "Home"),
+                    ("search", "Search"),
+                    ("favorite", "Saved"),
+                    ("person", "Me"),
+                ];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + i as f32 * 56.0 * u;
                     let sel = self.rail == i;
@@ -1305,22 +1878,71 @@ impl Gallery {
                         self.pal.sub
                     };
                     if sel {
-                        ui.rect(x + 12.0 * u, iy + 4.0 * u, 56.0 * u, 32.0 * u, self.pal.secondary_container, r4(16.0 * u));
+                        ui.rect(
+                            x + 12.0 * u,
+                            iy + 4.0 * u,
+                            56.0 * u,
+                            32.0 * u,
+                            self.pal.secondary_container,
+                            r4(16.0 * u),
+                        );
                     }
-                    self.layer(ui, Action::Rail(i), Rect { x, y: iy, w: 80.0 * u, h: 56.0 * u }, 16.0 * u, self.pal.text);
-                    self.draw_ripples(ui, Rect { x, y: iy, w: 80.0 * u, h: 56.0 * u });
+                    self.layer(
+                        ui,
+                        Action::Rail(i),
+                        Rect {
+                            x,
+                            y: iy,
+                            w: 80.0 * u,
+                            h: 56.0 * u,
+                        },
+                        16.0 * u,
+                        self.pal.text,
+                    );
+                    self.draw_ripples(
+                        ui,
+                        Rect {
+                            x,
+                            y: iy,
+                            w: 80.0 * u,
+                            h: 56.0 * u,
+                        },
+                    );
                     icon_c(ui, ic, x + 40.0 * u, iy + 20.0 * u, 24.0 * u, ink);
-                    let style = ts(M3_LABEL_MEDIUM, if sel { self.pal.text } else { self.pal.sub }, u);
+                    let style = ts(
+                        M3_LABEL_MEDIUM,
+                        if sel { self.pal.text } else { self.pal.sub },
+                        u,
+                    );
                     let tw = ui.text_width(lb, style.px, style.medium, style.tracking_em);
                     ui.text(lb, x + 40.0 * u - tw * 0.5, iy + 38.0 * u, style);
-                    self.zone(Action::Rail(i), Rect { x, y: iy, w: 80.0 * u, h: 56.0 * u }, ink);
+                    self.zone(
+                        Action::Rail(i),
+                        Rect {
+                            x,
+                            y: iy,
+                            w: 80.0 * u,
+                            h: 56.0 * u,
+                        },
+                        ink,
+                    );
                 }
             }
             ComponentId::NavigationDrawer => {
                 let dw = 280.0 * u;
                 ui.rect(x, y, dw, 288.0 * u, self.pal.card_hi, r4(12.0 * u));
-                ui.text("Geek Mail", x + 16.0 * u, y + 16.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
-                let items = [("mail", "Inbox"), ("send", "Sent"), ("edit", "Drafts"), ("delete", "Trash")];
+                ui.text(
+                    "Geek Mail",
+                    x + 16.0 * u,
+                    y + 16.0 * u,
+                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                );
+                let items = [
+                    ("mail", "Inbox"),
+                    ("send", "Sent"),
+                    ("edit", "Drafts"),
+                    ("delete", "Trash"),
+                ];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 48.0 * u + i as f32 * 56.0 * u;
                     let sel = self.drawer == i;
@@ -1330,48 +1952,194 @@ impl Gallery {
                         self.pal.text
                     };
                     if sel {
-                        ui.rect(x + 12.0 * u, iy, dw - 24.0 * u, 56.0 * u, self.pal.secondary_container, r4(28.0 * u));
+                        ui.rect(
+                            x + 12.0 * u,
+                            iy,
+                            dw - 24.0 * u,
+                            56.0 * u,
+                            self.pal.secondary_container,
+                            r4(28.0 * u),
+                        );
                     }
-                    self.layer(ui, Action::Drawer(i), Rect { x: x + 12.0 * u, y: iy, w: dw - 24.0 * u, h: 56.0 * u }, 28.0 * u, self.pal.text);
-                    self.draw_ripples(ui, Rect { x: x + 12.0 * u, y: iy, w: dw - 24.0 * u, h: 56.0 * u });
+                    self.layer(
+                        ui,
+                        Action::Drawer(i),
+                        Rect {
+                            x: x + 12.0 * u,
+                            y: iy,
+                            w: dw - 24.0 * u,
+                            h: 56.0 * u,
+                        },
+                        28.0 * u,
+                        self.pal.text,
+                    );
+                    self.draw_ripples(
+                        ui,
+                        Rect {
+                            x: x + 12.0 * u,
+                            y: iy,
+                            w: dw - 24.0 * u,
+                            h: 56.0 * u,
+                        },
+                    );
                     icon_c(ui, ic, x + 28.0 * u, iy + 28.0 * u, 24.0 * u, ink);
                     ui.text(lb, x + 56.0 * u, iy + 18.0 * u, ts(M3_LABEL_LARGE, ink, u));
-                    self.zone(Action::Drawer(i), Rect { x: x + 12.0 * u, y: iy, w: dw - 24.0 * u, h: 56.0 * u }, ink);
+                    self.zone(
+                        Action::Drawer(i),
+                        Rect {
+                            x: x + 12.0 * u,
+                            y: iy,
+                            w: dw - 24.0 * u,
+                            h: 56.0 * u,
+                        },
+                        ink,
+                    );
                 }
             }
             ComponentId::Scaffold => {
                 let sw = 320.0 * u.min(w);
                 ui.rect(x, y, sw, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
                 ui.rect(x, y + 32.0 * u, sw, 32.0 * u, self.pal.card_hi, r4(0.0));
-                ui.text("Scaffold", x + 16.0 * u, y + 18.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
-                icon_c(ui, "more_vert", x + sw - 28.0 * u, y + 32.0 * u, 24.0 * u, self.pal.sub);
-                ui.text("Body content lives here.", x + 16.0 * u, y + 80.0 * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
+                ui.text(
+                    "Scaffold",
+                    x + 16.0 * u,
+                    y + 18.0 * u,
+                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                );
+                icon_c(
+                    ui,
+                    "more_vert",
+                    x + sw - 28.0 * u,
+                    y + 32.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
+                ui.text(
+                    "Body content lives here.",
+                    x + 16.0 * u,
+                    y + 80.0 * u,
+                    ts(M3_BODY_MEDIUM, self.pal.sub, u),
+                );
                 let fy = y + 76.0 * u;
-                self.fab(ui, Action::Button(80), x + sw - 72.0 * u, fy, 56.0 * u, "add");
-                ui.rect(x, y + 152.0 * u, sw, 80.0 * u, self.pal.card_hi, r4(12.0 * u));
+                self.fab(
+                    ui,
+                    Action::Button(80),
+                    x + sw - 72.0 * u,
+                    fy,
+                    56.0 * u,
+                    "add",
+                );
+                ui.rect(
+                    x,
+                    y + 152.0 * u,
+                    sw,
+                    80.0 * u,
+                    self.pal.card_hi,
+                    r4(12.0 * u),
+                );
                 ui.rect(x, y + 152.0 * u, sw, 40.0 * u, self.pal.card_hi, r4(0.0));
                 let icons = ["home", "search", "person"];
                 for (i, ic) in icons.into_iter().enumerate() {
-                    icon_c(ui, ic, x + sw * 0.5 + (i as f32 - 1.0) * 64.0 * u, y + 192.0 * u, 24.0 * u, self.pal.sub);
+                    icon_c(
+                        ui,
+                        ic,
+                        x + sw * 0.5 + (i as f32 - 1.0) * 64.0 * u,
+                        y + 192.0 * u,
+                        24.0 * u,
+                        self.pal.sub,
+                    );
                 }
             }
             ComponentId::TopAppBar => {
                 ui.rect(x, y, w, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
-                self.icon_button(ui, 90, x + 4.0 * u, y + 12.0 * u, "arrow_back", IconBtn::Standard);
-                ui.text("Gallery", x + 56.0 * u, y + 18.0 * u, ts(M3_TITLE_LARGE, self.pal.text, u));
-                self.icon_button(ui, 91, x + w - 88.0 * u, y + 12.0 * u, "search", IconBtn::Standard);
-                self.icon_button(ui, 92, x + w - 44.0 * u, y + 12.0 * u, "more_vert", IconBtn::Standard);
+                self.icon_button(
+                    ui,
+                    90,
+                    x + 4.0 * u,
+                    y + 12.0 * u,
+                    "arrow_back",
+                    IconBtn::Standard,
+                );
+                ui.text(
+                    "Gallery",
+                    x + 56.0 * u,
+                    y + 18.0 * u,
+                    ts(M3_TITLE_LARGE, self.pal.text, u),
+                );
+                self.icon_button(
+                    ui,
+                    91,
+                    x + w - 88.0 * u,
+                    y + 12.0 * u,
+                    "search",
+                    IconBtn::Standard,
+                );
+                self.icon_button(
+                    ui,
+                    92,
+                    x + w - 44.0 * u,
+                    y + 12.0 * u,
+                    "more_vert",
+                    IconBtn::Standard,
+                );
             }
             ComponentId::SearchBar => {
                 let sw = 360.0 * u.min(w);
-                ui.rect(x, y + 2.0 * u, sw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(28.0 * u));
+                ui.rect(
+                    x,
+                    y + 2.0 * u,
+                    sw,
+                    56.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(28.0 * u),
+                );
                 ui.rect(x, y, sw, 56.0 * u, self.pal.card_hi, r4(28.0 * u));
                 let a = Action::Button(93);
-                self.layer(ui, a, Rect { x, y, w: sw, h: 56.0 * u }, 28.0 * u, self.pal.text);
-                self.draw_ripples(ui, Rect { x, y, w: sw, h: 56.0 * u });
-                icon_c(ui, "search", x + 20.0 * u, y + 28.0 * u, 24.0 * u, self.pal.sub);
-                ui.text("Search components", x + 52.0 * u, y + 16.0 * u, ts(M3_BODY_LARGE, self.pal.sub, u));
-                self.zone(a, Rect { x, y, w: sw, h: 56.0 * u }, self.pal.text);
+                self.layer(
+                    ui,
+                    a,
+                    Rect {
+                        x,
+                        y,
+                        w: sw,
+                        h: 56.0 * u,
+                    },
+                    28.0 * u,
+                    self.pal.text,
+                );
+                self.draw_ripples(
+                    ui,
+                    Rect {
+                        x,
+                        y,
+                        w: sw,
+                        h: 56.0 * u,
+                    },
+                );
+                icon_c(
+                    ui,
+                    "search",
+                    x + 20.0 * u,
+                    y + 28.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
+                ui.text(
+                    "Search components",
+                    x + 52.0 * u,
+                    y + 16.0 * u,
+                    ts(M3_BODY_LARGE, self.pal.sub, u),
+                );
+                self.zone(
+                    a,
+                    Rect {
+                        x,
+                        y,
+                        w: sw,
+                        h: 56.0 * u,
+                    },
+                    self.pal.text,
+                );
             }
             ComponentId::TextField => {
                 let f = self.focus.x;
@@ -1383,20 +2151,61 @@ impl Gallery {
                     y + 6.0 * u,
                     ts(M3_BODY_SMALL, mix(self.pal.sub, self.pal.primary, f), u),
                 );
-                ui.text("Hello geek", x + 16.0 * u, y + 26.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
+                ui.text(
+                    "Hello geek",
+                    x + 16.0 * u,
+                    y + 26.0 * u,
+                    ts(M3_BODY_LARGE, self.pal.text, u),
+                );
                 let ih = 1.0 * u + f;
-                ui.rect(x, y + 56.0 * u - ih, w, ih, mix(self.pal.outline, self.pal.primary, f), r4(0.0));
+                ui.rect(
+                    x,
+                    y + 56.0 * u - ih,
+                    w,
+                    ih,
+                    mix(self.pal.outline, self.pal.primary, f),
+                    r4(0.0),
+                );
                 let oy = y + 76.0 * u;
                 ui.stroke(x, oy, w, 56.0 * u, self.pal.outline, r4(4.0 * u), 1.0 * u);
-                ui.text("Outlined", x + 16.0 * u, oy + 6.0 * u, ts(M3_BODY_SMALL, self.pal.sub, u));
-                ui.text("secret", x + 16.0 * u, oy + 26.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
-                icon_c(ui, "visibility_off", x + w - 28.0 * u, oy + 28.0 * u, 24.0 * u, self.pal.sub);
+                ui.text(
+                    "Outlined",
+                    x + 16.0 * u,
+                    oy + 6.0 * u,
+                    ts(M3_BODY_SMALL, self.pal.sub, u),
+                );
+                ui.text(
+                    "secret",
+                    x + 16.0 * u,
+                    oy + 26.0 * u,
+                    ts(M3_BODY_LARGE, self.pal.text, u),
+                );
+                icon_c(
+                    ui,
+                    "visibility_off",
+                    x + w - 28.0 * u,
+                    oy + 28.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
             }
             ComponentId::Menu => {
                 let mw = 240.0 * u;
-                ui.rect(x, y + 2.0 * u, mw, 200.0 * u, with_alpha(self.pal.bg, 0.7), r4(4.0 * u));
+                ui.rect(
+                    x,
+                    y + 2.0 * u,
+                    mw,
+                    200.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(4.0 * u),
+                );
                 ui.rect(x, y, mw, 200.0 * u, self.pal.card_hi, r4(4.0 * u));
-                let items = [("edit", "Rename"), ("share", "Share"), ("link", "Copy link"), ("delete", "Delete")];
+                let items = [
+                    ("edit", "Rename"),
+                    ("share", "Share"),
+                    ("link", "Copy link"),
+                    ("delete", "Delete"),
+                ];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 4.0 * u + i as f32 * 48.0 * u;
                     let sel = self.menu_sel == i;
@@ -1406,9 +2215,21 @@ impl Gallery {
                         self.pal.text
                     };
                     if sel {
-                        ui.rect(x + 4.0 * u, iy, mw - 8.0 * u, 48.0 * u, self.pal.secondary_container, r4(4.0 * u));
+                        ui.rect(
+                            x + 4.0 * u,
+                            iy,
+                            mw - 8.0 * u,
+                            48.0 * u,
+                            self.pal.secondary_container,
+                            r4(4.0 * u),
+                        );
                     }
-                    let rect = Rect { x: x + 4.0 * u, y: iy, w: mw - 8.0 * u, h: 48.0 * u };
+                    let rect = Rect {
+                        x: x + 4.0 * u,
+                        y: iy,
+                        w: mw - 8.0 * u,
+                        h: 48.0 * u,
+                    };
                     self.layer(ui, Action::MenuItem(i), rect, 4.0 * u, self.pal.text);
                     self.draw_ripples(ui, rect);
                     icon_c(ui, ic, x + 20.0 * u, iy + 24.0 * u, 24.0 * u, ink);
@@ -1439,29 +2260,73 @@ impl Gallery {
                     ui.rect(cx0, cy, cw, ch, fill, r4(12.0 * u));
                     icon_c(ui, "image", cx0 + cw * 0.5, cy + ch * 0.4, 24.0 * u, ink);
                     let label = format!("Item {}", i + 1);
-                    ui.text(&label, cx0 + 12.0 * u, cy + ch - 32.0 * u, ts(M3_BODY_MEDIUM, ink, u));
+                    ui.text(
+                        &label,
+                        cx0 + 12.0 * u,
+                        cy + ch - 32.0 * u,
+                        ts(M3_BODY_MEDIUM, ink, u),
+                    );
                     cx0 += cw + 8.0 * u;
                 }
                 for i in 0..3 {
                     let sel = self.carousel == i;
                     let dx = x + 24.0 * u + i as f32 * 28.0 * u;
-                    ui.circle(dx, y + 158.0 * u, if sel { 5.0 * u } else { 3.0 * u }, if sel { self.pal.primary } else { self.pal.outline });
+                    ui.circle(
+                        dx,
+                        y + 158.0 * u,
+                        if sel { 5.0 * u } else { 3.0 * u },
+                        if sel {
+                            self.pal.primary
+                        } else {
+                            self.pal.outline
+                        },
+                    );
                     self.zone(
                         Action::CarouselPage(i),
-                        Rect { x: dx - 12.0 * u, y: y + 146.0 * u, w: 24.0 * u, h: 24.0 * u },
+                        Rect {
+                            x: dx - 12.0 * u,
+                            y: y + 146.0 * u,
+                            w: 24.0 * u,
+                            h: 24.0 * u,
+                        },
                         self.pal.text,
                     );
                 }
             }
             ComponentId::DatePicker => {
-                ui.text("October 2026", x + 12.0 * u, y + 8.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
-                icon_c(ui, "arrow_back", x + w - 72.0 * u, y + 20.0 * u, 24.0 * u, self.pal.sub);
-                icon_c(ui, "arrow_forward", x + w - 36.0 * u, y + 20.0 * u, 24.0 * u, self.pal.sub);
+                ui.text(
+                    "October 2026",
+                    x + 12.0 * u,
+                    y + 8.0 * u,
+                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                );
+                icon_c(
+                    ui,
+                    "arrow_back",
+                    x + w - 72.0 * u,
+                    y + 20.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
+                icon_c(
+                    ui,
+                    "arrow_forward",
+                    x + w - 36.0 * u,
+                    y + 20.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
                 let cw = 44.0 * u;
                 let x0 = x + (w - 7.0 * cw) * 0.5;
                 let wd = ["M", "T", "W", "T", "F", "S", "S"];
                 for (i, d) in wd.into_iter().enumerate() {
-                    text_c(ui, d, x0 + i as f32 * cw + cw * 0.5, y + 44.0 * u, ts(M3_LABEL_MEDIUM, self.pal.sub, u));
+                    text_c(
+                        ui,
+                        d,
+                        x0 + i as f32 * cw + cw * 0.5,
+                        y + 44.0 * u,
+                        ts(M3_LABEL_MEDIUM, self.pal.sub, u),
+                    );
                 }
                 for day in 0..30 {
                     let col = day % 7;
@@ -1489,7 +2354,15 @@ impl Gallery {
                         &label,
                         gx,
                         gy - 10.0 * u,
-                        ts(M3_LABEL_LARGE, if sel { self.pal.on_primary } else { self.pal.text }, u),
+                        ts(
+                            M3_LABEL_LARGE,
+                            if sel {
+                                self.pal.on_primary
+                            } else {
+                                self.pal.text
+                            },
+                            u,
+                        ),
                     );
                 }
             }
@@ -1499,7 +2372,12 @@ impl Gallery {
                 ui.circle(cx, cy, 88.0 * u, self.pal.card_hi);
                 for k in 0..12 {
                     let ang = (k as f32 * 30.0f32 - 90.0f32).to_radians();
-                    ui.circle(cx + 74.0 * u * ang.cos(), cy + 74.0 * u * ang.sin(), 2.0 * u, self.pal.sub);
+                    ui.circle(
+                        cx + 74.0 * u * ang.cos(),
+                        cy + 74.0 * u * ang.sin(),
+                        2.0 * u,
+                        self.pal.sub,
+                    );
                 }
                 let nums = [("12", -90.0f32), ("3", 0.0), ("6", 90.0), ("9", 180.0)];
                 for (n, deg) in nums.into_iter() {
@@ -1512,18 +2390,47 @@ impl Gallery {
                         ts(M3_LABEL_LARGE, self.pal.text, u),
                     );
                 }
-                ui.rect(cx - 2.0 * u, cy - 56.0 * u, 4.0 * u, 56.0 * u, self.pal.primary, r4(2.0 * u));
+                ui.rect(
+                    cx - 2.0 * u,
+                    cy - 56.0 * u,
+                    4.0 * u,
+                    56.0 * u,
+                    self.pal.primary,
+                    r4(2.0 * u),
+                );
                 let hand = 306.0f32.to_radians();
                 for k in 1..=9 {
                     let rr = k as f32 * 4.0 * u;
-                    ui.circle(cx + rr * hand.cos(), cy + rr * hand.sin(), 2.2 * u, self.pal.primary);
+                    ui.circle(
+                        cx + rr * hand.cos(),
+                        cy + rr * hand.sin(),
+                        2.2 * u,
+                        self.pal.primary,
+                    );
                 }
                 ui.circle(cx, cy, 5.0 * u, self.pal.primary);
-                ui.text("10:24", x + 212.0 * u, y + 70.0 * u, ts(M3_DISPLAY_SMALL, self.pal.text, u));
-                ui.text("AM", x + 216.0 * u, y + 122.0 * u, ts(M3_LABEL_LARGE, self.pal.sub, u));
+                ui.text(
+                    "10:24",
+                    x + 212.0 * u,
+                    y + 70.0 * u,
+                    ts(M3_DISPLAY_SMALL, self.pal.text, u),
+                );
+                ui.text(
+                    "AM",
+                    x + 216.0 * u,
+                    y + 122.0 * u,
+                    ts(M3_LABEL_LARGE, self.pal.sub, u),
+                );
             }
             ComponentId::Tooltip => {
-                ui.rect(x + 40.0 * u, y, 132.0 * u, 32.0 * u, self.pal.inverse, r4(4.0 * u));
+                ui.rect(
+                    x + 40.0 * u,
+                    y,
+                    132.0 * u,
+                    32.0 * u,
+                    self.pal.inverse,
+                    r4(4.0 * u),
+                );
                 text_c(
                     ui,
                     "Plain tooltip",
@@ -1531,7 +2438,14 @@ impl Gallery {
                     y + 8.0 * u,
                     ts(M3_BODY_SMALL, self.pal.on_inverse, u),
                 );
-                ui.rect(x + 40.0 * u, y + 44.0 * u, 280.0 * u, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
+                ui.rect(
+                    x + 40.0 * u,
+                    y + 44.0 * u,
+                    280.0 * u,
+                    64.0 * u,
+                    self.pal.card_hi,
+                    r4(12.0 * u),
+                );
                 ui.stroke(
                     x + 40.0 * u,
                     y + 44.0 * u,
@@ -1541,34 +2455,89 @@ impl Gallery {
                     r4(12.0 * u),
                     1.0 * u,
                 );
-                ui.text("Rich tooltip", x + 56.0 * u, y + 52.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
-                ui.text("Long press an item to show this.", x + 56.0 * u, y + 76.0 * u, ts(M3_BODY_SMALL, self.pal.sub, u));
+                ui.text(
+                    "Rich tooltip",
+                    x + 56.0 * u,
+                    y + 52.0 * u,
+                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                );
+                ui.text(
+                    "Long press an item to show this.",
+                    x + 56.0 * u,
+                    y + 76.0 * u,
+                    ts(M3_BODY_SMALL, self.pal.sub, u),
+                );
             }
             ComponentId::Snackbar => {
                 ui.rect(x, y + 8.0 * u, w, 48.0 * u, self.pal.inverse, r4(4.0 * u));
                 let st = ts(M3_LABEL_LARGE, self.pal.inverse_primary, u);
                 let tw = ui.text_width("Undo", st.px, st.medium, st.tracking_em);
                 let a = Action::Button(96);
-                let rect = Rect { x: x + w - 16.0 * u - tw - 8.0 * u, y: y + 8.0 * u, w: tw + 16.0 * u, h: 48.0 * u };
+                let rect = Rect {
+                    x: x + w - 16.0 * u - tw - 8.0 * u,
+                    y: y + 8.0 * u,
+                    w: tw + 16.0 * u,
+                    h: 48.0 * u,
+                };
                 self.layer(ui, a, rect, 4.0 * u, self.pal.inverse_primary);
                 self.draw_ripples(ui, rect);
-                ui.text("Message sent", x + 16.0 * u, y + 22.0 * u, ts(M3_BODY_MEDIUM, self.pal.on_inverse, u));
+                ui.text(
+                    "Message sent",
+                    x + 16.0 * u,
+                    y + 22.0 * u,
+                    ts(M3_BODY_MEDIUM, self.pal.on_inverse, u),
+                );
                 ui.text("Undo", x + w - 16.0 * u - tw, y + 22.0 * u, st);
                 self.zone(a, rect, self.pal.inverse_primary);
             }
             ComponentId::Badge => {
-                icon_c(ui, "notifications", x + 24.0 * u, y + 24.0 * u, 24.0 * u, self.pal.text);
+                icon_c(
+                    ui,
+                    "notifications",
+                    x + 24.0 * u,
+                    y + 24.0 * u,
+                    24.0 * u,
+                    self.pal.text,
+                );
                 ui.circle(x + 38.0 * u, y + 12.0 * u, 3.0 * u, self.pal.error);
-                icon_c(ui, "person", x + 72.0 * u, y + 24.0 * u, 24.0 * u, self.pal.text);
+                icon_c(
+                    ui,
+                    "person",
+                    x + 72.0 * u,
+                    y + 24.0 * u,
+                    24.0 * u,
+                    self.pal.text,
+                );
                 ui.circle(x + 86.0 * u, y + 12.0 * u, 8.0 * u, self.pal.error);
-                text_c(ui, "3", x + 86.0 * u, y + 4.0 * u, ts(M3_LABEL_SMALL, self.pal.on_error, u));
-                ui.text("Badges sit on the top-right corner.", x + 116.0 * u, y + 18.0 * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
+                text_c(
+                    ui,
+                    "3",
+                    x + 86.0 * u,
+                    y + 4.0 * u,
+                    ts(M3_LABEL_SMALL, self.pal.on_error, u),
+                );
+                ui.text(
+                    "Badges sit on the top-right corner.",
+                    x + 116.0 * u,
+                    y + 18.0 * u,
+                    ts(M3_BODY_MEDIUM, self.pal.sub, u),
+                );
             }
             ComponentId::ListItem => {
                 let rows = [
                     ("person", "Single line item", "", 56.0f32),
-                    ("history", "Two line item", "Supporting text follows the headline.", 72.0),
-                    ("description", "Three line item", "First supporting line of copy.", 88.0),
+                    (
+                        "history",
+                        "Two line item",
+                        "Supporting text follows the headline.",
+                        72.0,
+                    ),
+                    (
+                        "description",
+                        "Three line item",
+                        "First supporting line of copy.",
+                        88.0,
+                    ),
                 ];
                 let mut ry = y;
                 for (i, (ic, head, support, h)) in rows.into_iter().enumerate() {
@@ -1577,9 +2546,19 @@ impl Gallery {
                     self.layer(ui, a, Rect { x, y: ry, w, h: hh }, 0.0, self.pal.text);
                     self.draw_ripples(ui, Rect { x, y: ry, w, h: hh });
                     icon_c(ui, ic, x + 28.0 * u, ry + hh * 0.5, 24.0 * u, self.pal.text);
-                    ui.text(head, x + 56.0 * u, ry + if h >= 88.0 { 12.0 } else { 16.0 } * u, ts(M3_BODY_LARGE, self.pal.text, u));
+                    ui.text(
+                        head,
+                        x + 56.0 * u,
+                        ry + if h >= 88.0 { 12.0 } else { 16.0 } * u,
+                        ts(M3_BODY_LARGE, self.pal.text, u),
+                    );
                     if !support.is_empty() {
-                        ui.text(support, x + 56.0 * u, ry + if h >= 88.0 { 36.0 } else { 40.0 } * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
+                        ui.text(
+                            support,
+                            x + 56.0 * u,
+                            ry + if h >= 88.0 { 36.0 } else { 40.0 } * u,
+                            ts(M3_BODY_MEDIUM, self.pal.sub, u),
+                        );
                     }
                     if h >= 88.0 {
                         ui.text(
@@ -1592,24 +2571,52 @@ impl Gallery {
                     let tr = "12:00";
                     let style = ts(M3_LABEL_SMALL, self.pal.sub, u);
                     let tw = ui.text_width(tr, style.px, style.medium, style.tracking_em);
-                    ui.text(tr, x + w - 16.0 * u - tw, ry + if h >= 72.0 { 16.0 } else { 20.0 } * u, style);
+                    ui.text(
+                        tr,
+                        x + w - 16.0 * u - tw,
+                        ry + if h >= 72.0 { 16.0 } else { 20.0 } * u,
+                        style,
+                    );
                     self.zone(a, Rect { x, y: ry, w, h: hh }, self.pal.text);
                     ry += hh;
                 }
             }
             ComponentId::Tabs => {
-                let items = [("code", "Code"), ("terminal", "Build"), ("send", "Ship"), ("description", "Docs")];
+                let items = [
+                    ("code", "Code"),
+                    ("terminal", "Build"),
+                    ("send", "Ship"),
+                    ("description", "Docs"),
+                ];
                 let tw2 = w / 4.0;
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let tx = x + i as f32 * tw2;
                     let sel = self.tabs == i;
                     let col = if sel { self.pal.primary } else { self.pal.sub };
                     icon_c(ui, ic, tx + tw2 * 0.5, y + 20.0 * u, 24.0 * u, col);
-                    text_c(ui, lb, tx + tw2 * 0.5, y + 36.0 * u, ts(M3_TITLE_SMALL, col, u));
+                    text_c(
+                        ui,
+                        lb,
+                        tx + tw2 * 0.5,
+                        y + 36.0 * u,
+                        ts(M3_TITLE_SMALL, col, u),
+                    );
                     if sel {
-                        ui.rect(tx + 24.0 * u, y + 61.0 * u, tw2 - 48.0 * u, 3.0 * u, self.pal.primary, r4(1.5 * u));
+                        ui.rect(
+                            tx + 24.0 * u,
+                            y + 61.0 * u,
+                            tw2 - 48.0 * u,
+                            3.0 * u,
+                            self.pal.primary,
+                            r4(1.5 * u),
+                        );
                     }
-                    let rect = Rect { x: tx, y, w: tw2, h: 64.0 * u };
+                    let rect = Rect {
+                        x: tx,
+                        y,
+                        w: tw2,
+                        h: 64.0 * u,
+                    };
                     self.layer(ui, Action::Tab(i), rect, 0.0, self.pal.text);
                     self.draw_ripples(ui, rect);
                     self.zone(Action::Tab(i), rect, self.pal.text);
@@ -1641,7 +2648,14 @@ impl Gallery {
                         );
                     }
                     if i > 0 && self.segmented != i && self.segmented != i - 1 {
-                        ui.rect(sx - 0.5 * u, y + 8.0 * u, 1.0 * u, 24.0 * u, self.pal.outline, r4(0.0));
+                        ui.rect(
+                            sx - 0.5 * u,
+                            y + 8.0 * u,
+                            1.0 * u,
+                            24.0 * u,
+                            self.pal.outline,
+                            r4(0.0),
+                        );
                     }
                     let ink = if sel {
                         self.pal.on_secondary_container
@@ -1656,37 +2670,99 @@ impl Gallery {
                         icon_c(ui, "check", start + 9.0 * u, y + 20.0 * u, 18.0 * u, ink);
                     }
                     ui.text(lb, start + icon_w, y + 20.0 * u - style.line_h * 0.5, style);
-                    let rect = Rect { x: sx, y, w: sw, h: 40.0 * u };
+                    let rect = Rect {
+                        x: sx,
+                        y,
+                        w: sw,
+                        h: 40.0 * u,
+                    };
                     self.layer(ui, Action::Segmented(i), rect, 0.0, self.pal.text);
                     self.draw_ripples(ui, rect);
                     self.zone(Action::Segmented(i), rect, self.pal.text);
                 }
             }
             ComponentId::Divider => {
-                ui.rect(x, y + 12.0 * u, w, 1.0 * u, self.pal.outline_variant, r4(0.5 * u));
+                ui.rect(
+                    x,
+                    y + 12.0 * u,
+                    w,
+                    1.0 * u,
+                    self.pal.outline_variant,
+                    r4(0.5 * u),
+                );
             }
             ComponentId::PullToRefresh => {
                 let start = (self.t * 240.0) % 360.0;
                 self.arc(ui, x + 28.0 * u, y + 24.0 * u, 14.0 * u, start, 270.0);
-                ui.text("Pull down to refresh", x + 64.0 * u, y + 14.0 * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
+                ui.text(
+                    "Pull down to refresh",
+                    x + 64.0 * u,
+                    y + 14.0 * u,
+                    ts(M3_BODY_MEDIUM, self.pal.sub, u),
+                );
             }
             ComponentId::SwipeToDismiss => {
                 ui.rect(x, y + 4.0 * u, w, 56.0 * u, self.pal.error, r4(12.0 * u));
-                icon_c(ui, "delete", x + w - 32.0 * u, y + 32.0 * u, 24.0 * u, self.pal.on_error);
-                ui.text("Delete", x + w - 108.0 * u, y + 22.0 * u, ts(M3_LABEL_LARGE, self.pal.on_error, u));
+                icon_c(
+                    ui,
+                    "delete",
+                    x + w - 32.0 * u,
+                    y + 32.0 * u,
+                    24.0 * u,
+                    self.pal.on_error,
+                );
+                ui.text(
+                    "Delete",
+                    x + w - 108.0 * u,
+                    y + 22.0 * u,
+                    ts(M3_LABEL_LARGE, self.pal.on_error, u),
+                );
                 let fw = w - 90.0 * u;
-                ui.rect(x, y + 6.0 * u, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(12.0 * u));
+                ui.rect(
+                    x,
+                    y + 6.0 * u,
+                    fw,
+                    56.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(12.0 * u),
+                );
                 ui.rect(x, y + 4.0 * u, fw, 56.0 * u, self.pal.card_hi, r4(12.0 * u));
-                ui.text("Swipe me away", x + 16.0 * u, y + 22.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
-                icon_c(ui, "mail", x + fw - 32.0 * u, y + 32.0 * u, 24.0 * u, self.pal.sub);
+                ui.text(
+                    "Swipe me away",
+                    x + 16.0 * u,
+                    y + 22.0 * u,
+                    ts(M3_BODY_LARGE, self.pal.text, u),
+                );
+                icon_c(
+                    ui,
+                    "mail",
+                    x + fw - 32.0 * u,
+                    y + 32.0 * u,
+                    24.0 * u,
+                    self.pal.sub,
+                );
             }
             ComponentId::Toolbar => {
                 let icons = ["edit", "palette", "brush", "more_vert"];
                 let tw3 = 4.0 * 40.0 * u + 8.0 * u;
-                ui.rect(x, y + 2.0 * u, tw3, 52.0 * u, with_alpha(self.pal.bg, 0.7), r4(26.0 * u));
+                ui.rect(
+                    x,
+                    y + 2.0 * u,
+                    tw3,
+                    52.0 * u,
+                    with_alpha(self.pal.bg, 0.7),
+                    r4(26.0 * u),
+                );
                 ui.rect(x, y, tw3, 52.0 * u, self.pal.card_hi, r4(26.0 * u));
                 for (i, ic) in icons.into_iter().enumerate() {
-                    self.icon_button(ui, 40 + i as u32, x + 4.0 * u + i as f32 * 40.0 * u, y + 6.0 * u, ic, IconBtn::Standard);
+                    self.icon_button(
+                        ui,
+                        40 + i as u32,
+                        x + 4.0 * u + i as f32 * 40.0 * u,
+                        y + 6.0 * u,
+                        ic,
+                        IconBtn::Standard,
+                    );
                 }
             }
         }
@@ -1716,12 +2792,12 @@ impl GalleryApp {
     }
 
     pub fn resume(&mut self, window: Arc<Window>) -> bool {
+        use log::{error, info};
         use wgpu::{
             CompositeAlphaMode, DeviceDescriptor, ExperimentalFeatures, Features, Instance,
             InstanceDescriptor, MemoryHints, PowerPreference, PresentMode, RequestAdapterOptions,
             TextureFormat, TextureUsages, Trace,
         };
-        use log::{error, info};
         let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let surface = match instance.create_surface(window.clone()) {
             Ok(surface) => surface,
@@ -1803,13 +2879,12 @@ impl GalleryApp {
             ui.config.width = width.max(1);
             ui.config.height = height.max(1);
             ui.surface.configure(&ui.device, &ui.config);
-            ui.renderer
-                .set_screen(
-                    &ui.device,
-                    &ui.queue,
-                    ui.config.width as f32,
-                    ui.config.height as f32,
-                );
+            ui.renderer.set_screen(
+                &ui.device,
+                &ui.queue,
+                ui.config.width as f32,
+                ui.config.height as f32,
+            );
         }
     }
 
@@ -1856,9 +2931,13 @@ impl GalleryApp {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.gallery
-            .draw(&mut ui.renderer, ui.config.width as f32, ui.config.height as f32);
-        ui.renderer.flush(&ui.device, &ui.queue, &view, self.gallery.bg());
+        self.gallery.draw(
+            &mut ui.renderer,
+            ui.config.width as f32,
+            ui.config.height as f32,
+        );
+        ui.renderer
+            .flush(&ui.device, &ui.queue, &view, self.gallery.bg());
         ui.queue.present(frame);
         ui.window.request_redraw();
     }

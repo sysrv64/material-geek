@@ -1,5 +1,4 @@
 [workspace]
-exclude = ["crates/mg-android"]
 members = [
     "crates/mg-tokens",
     "crates/mg-motion",
@@ -7,8 +6,12 @@ members = [
     "crates/mg-components",
     "crates/mg-demo",
     "crates/mg-render",
+    "crates/mg-android",
 ]
 resolver = "2"
+
+[patch.crates-io]
+winit = { git = "https://github.com/sysrv64/winit", branch = "android-destroy-close-request" }
 
 [workspace.package]
 version = "0.1.0"

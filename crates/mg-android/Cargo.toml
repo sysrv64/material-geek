@@ -9,8 +9,6 @@ rust-version = "1.86"
 [lib]
 crate-type = ["cdylib"]
 
-[workspace]
-
 [dependencies]
 log = "0.4"
 mg-components = { path = "../mg-components" }
@@ -51,6 +49,3 @@ value = "mg_android"
 [[package.metadata.android.application.activity.intent_filter]]
 actions = ["android.intent.action.MAIN"]
 categories = ["android.intent.category.LAUNCHER"]
-
-[patch.crates-io]
-winit = { path = "../../vendor/winit" }
