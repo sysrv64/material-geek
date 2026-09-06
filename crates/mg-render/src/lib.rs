@@ -10,9 +10,9 @@ use wgpu::{
     VertexBufferLayout, VertexState, VertexStepMode,
 };
 
-const REGULAR: &[u8] = include_bytes!("../assets/Roboto-Regular.ttf");
-const MEDIUM: &[u8] = include_bytes!("../assets/Roboto-Medium.ttf");
-const ATLAS_SIZE: u32 = 1024;
+const REGULAR: &[u8] = include_bytes!("../assets/GoogleSansCode-Regular.ttf");
+const MEDIUM: &[u8] = include_bytes!("../assets/GoogleSansCode-Medium.ttf");
+const ATLAS_SIZE: u32 = 2048;
 
 const SHADER: &str = r#"
 struct Screen {
@@ -330,7 +330,7 @@ impl UiRenderer {
         let key = GlyphKey {
             font: font_idx as u8,
             id: gid.0,
-            px: px as u32,
+            px: (px * 16.0) as u32,
         };
         if let Some(entry) = self.glyphs.get(&key) {
             return Some(*entry);

@@ -75,7 +75,7 @@ Android lifecycle notes: the activity is `singleTask`, renderer init never kills
 
 ## Dependencies
 
-Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`; the `mg-render` crate adds `ab_glyph 0.2` for text, all verified as latest stable releases on crates.io. Bundled Roboto Regular and Medium are Apache 2.0 by the Roboto Project Authors.
+Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`; the `mg-render` crate adds `ab_glyph 0.2` for text, all verified as latest stable releases on crates.io. Bundled Google Sans Code Regular and Medium are SIL OFL 1.1 by the Google Sans Code Project Authors, static instances cut from the official variable font in google/fonts.
 
 ## License
 
