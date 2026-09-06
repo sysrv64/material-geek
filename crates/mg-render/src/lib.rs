@@ -100,6 +100,15 @@ impl PartialEq for GlyphKey {
 
 impl Eq for GlyphKey {}
 
+fn glyph_metrics(bounds: ab_glyph::Rect) -> (u32, u32) {
+    (bounds.width().ceil() as u32, bounds.height().ceil() as u32)
+}
+
+fn glyph_uv(ox: u32, oy: u32, gw: u32, gh: u32) -> [f32; 4] {
+    let s = ATLAS_SIZE as f32;
+    [ox as f32 / s, oy as f32 / s, gw as f32 / s, gh as f32 / s]
+}
+
 pub struct UiRenderer {
     pipeline: RenderPipeline,
     screen_buf: Buffer,
@@ -340,14 +349,13 @@ impl UiRenderer {
         glyph.position = point(0.0, 0.0);
         let outlined = scaled.outline_glyph(glyph)?;
         let bounds = outlined.px_bounds();
-        let w = (bounds.width().ceil() as u32) + 2;
-        let h = (bounds.height().ceil() as u32) + 2;
-        if self.cursor_x + w > ATLAS_SIZE {
+        let (gw, gh) = glyph_metrics(bounds);
+        if self.cursor_x + gw + 2 > ATLAS_SIZE {
             self.cursor_x = 0;
             self.cursor_y += self.row_h + 2;
             self.row_h = 0;
         }
-        if self.cursor_y + h > ATLAS_SIZE {
+        if self.cursor_y + gh + 2 > ATLAS_SIZE {
             return None;
         }
         let ox = self.cursor_x + 1;
@@ -358,16 +366,11 @@ impl UiRenderer {
                 self.atlas_data[idx] = (v * 255.0) as u8;
             }
         });
-        self.cursor_x += w + 2;
-        self.row_h = self.row_h.max(h + 2);
+        self.cursor_x += gw + 2;
+        self.row_h = self.row_h.max(gh + 2);
         self.atlas_dirty = true;
         let entry = GlyphEntry {
-            uv: [
-                (ox as f32 + bounds.min.x) / ATLAS_SIZE as f32,
-                (oy as f32 + bounds.min.y) / ATLAS_SIZE as f32,
-                bounds.width() / ATLAS_SIZE as f32,
-                bounds.height() / ATLAS_SIZE as f32,
-            ],
+            uv: glyph_uv(ox, oy, gw, gh),
             bx: bounds.min.x,
             by: bounds.min.y,
         };
@@ -504,5 +507,52 @@ impl UiRenderer {
         }
         queue.submit(Some(encoder.finish()));
         self.instances.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glyph_pixels_stay_inside_uv_window() {
+        let fonts = [
+            FontRef::try_from_slice(REGULAR).expect("regular"),
+            FontRef::try_from_slice(MEDIUM).expect("medium"),
+        ];
+        for font in fonts {
+            for px in [11.0f32, 13.0, 17.0, 22.0, 31.0, 46.5, 67.2] {
+                let scaled = font.as_scaled(PxScale::from(px));
+                for c in "Abgjy019:,.%+-()/ 10:24 Material-Geek".chars() {
+                    if c == ' ' {
+                        continue;
+                    }
+                    let mut glyph = scaled.scaled_glyph(c);
+                    glyph.position = point(0.0, 0.0);
+                    let Some(outlined) = scaled.outline_glyph(glyph) else {
+                        continue;
+                    };
+                    let (gw, gh) = glyph_metrics(outlined.px_bounds());
+                    if gw == 0 || gh == 0 {
+                        continue;
+                    }
+                    let mut hits = Vec::new();
+                    outlined.draw(|gx, gy, v| {
+                        if v > 0.0 {
+                            hits.push((gx, gy));
+                        }
+                    });
+                    assert!(!hits.is_empty());
+                    let uv = glyph_uv(1, 1, gw, gh);
+                    let s = ATLAS_SIZE as f32;
+                    for (gx, gy) in hits {
+                        let u = (1 + gx) as f32 / s;
+                        let v = (1 + gy) as f32 / s;
+                        assert!(u >= uv[0] && u <= uv[0] + uv[2]);
+                        assert!(v >= uv[1] && v <= uv[1] + uv[3]);
+                    }
+                }
+            }
+        }
     }
 }
