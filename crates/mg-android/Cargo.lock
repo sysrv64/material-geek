@@ -797,11 +797,21 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "log",
+ "mg-components",
  "mg-motion",
+ "mg-render",
  "mg-theme",
  "pollster",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "mg-components"
+version = "0.1.0"
+dependencies = [
+ "mg-tokens",
+ "serde",
 ]
 
 [[package]]
@@ -810,6 +820,14 @@ version = "0.1.0"
 dependencies = [
  "mg-tokens",
  "serde",
+]
+
+[[package]]
+name = "mg-render"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "wgpu",
 ]
 
 [[package]]

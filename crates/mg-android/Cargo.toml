@@ -13,7 +13,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 log = "0.4"
+mg-components = { path = "../mg-components" }
 mg-motion = { path = "../mg-motion" }
+mg-render = { path = "../mg-render" }
 mg-theme = { path = "../mg-theme" }
 pollster = "1"
 wgpu = "30"

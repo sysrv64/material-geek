@@ -1,0 +1,11 @@
+[package]
+name = "mg-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek universal wgpu 2D renderer with text"
+repository.workspace = true
+
+[dependencies]
+ab_glyph = { workspace = true }
+wgpu = { workspace = true }

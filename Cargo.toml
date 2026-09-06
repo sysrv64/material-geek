@@ -6,6 +6,7 @@ members = [
     "crates/mg-theme",
     "crates/mg-components",
     "crates/mg-demo",
+    "crates/mg-render",
 ]
 resolver = "2"
 
@@ -17,8 +18,11 @@ repository = "https://github.com/sysrv64/material-geek"
 rust-version = "1.86"
 
 [workspace.dependencies]
+ab_glyph = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
+wgpu = "30"
 mg-tokens = { path = "crates/mg-tokens" }
 mg-motion = { path = "crates/mg-motion" }
 mg-theme = { path = "crates/mg-theme" }
 mg-components = { path = "crates/mg-components" }
+mg-render = { path = "crates/mg-render" }

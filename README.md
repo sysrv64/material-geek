@@ -54,11 +54,12 @@ s.retarget(0.0);
 - `crates/mg-theme`: scheme plus motion binding
 - `crates/mg-components`: headless Props/State for 41 components
 - `crates/mg-demo`: headless core demo binary
-- `crates/mg-android`: Android shell, excluded from the host workspace, built only for the `aarch64-linux-android` target in CI
+- `crates/mg-render`: universal wgpu 2D renderer with Roboto text, shared by desktop and Android
+- `crates/mg-android`: Android shell plus Linux desktop entry, excluded from the host workspace, built for the `aarch64-linux-android` target in CI
 
 ## Android APK
 
-Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders the dark expressive surface color with a primary-colored circle that bounces on the expressive default spatial spring, retargeting at each settled end. The same scene is reusable on Linux desktop through the public `mg_android::run_desktop` entry.
+Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders a scrollable gallery of all 41 components in the dark expressive theme with Roboto text: drag to scroll, tap to toggle switches, checkboxes, radios, chips, tabs, navigation, menus and carousel pages, drag the slider, press buttons for spring morph feedback. The same scene runs on Linux desktop through the public `mg_android::run_desktop` entry.
 
 CI builds two artifacts on every `main` push: `material-geek-apk` (debug, auto-generated debug key) and `material-geek-apk-release` (release, signed with the repo keystore and verified with `apksigner verify --print-certs`). Release signing keys live only in GitHub Secrets (`MATERIAL_GEEK_KEYSTORE_BASE64`, `MATERIAL_GEEK_KEYSTORE_PASSWORD`, plus reserved `MATERIAL_GEEK_KEY_ALIAS` and `MATERIAL_GEEK_KEY_PASSWORD`); no key material is committed.
 
@@ -74,7 +75,7 @@ Android lifecycle notes: the activity is `singleTask`, renderer init never kills
 
 ## Dependencies
 
-Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`, all verified as latest stable releases on crates.io.
+Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`; the `mg-render` crate adds `ab_glyph 0.2` for text, all verified as latest stable releases on crates.io. Bundled Roboto Regular and Medium are Apache 2.0 by the Roboto Project Authors.
 
 ## License
 
