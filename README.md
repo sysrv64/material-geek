@@ -58,7 +58,7 @@ s.retarget(0.0);
 
 ## Android APK
 
-Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders the dark expressive surface color with a primary-colored circle that bounces on the expressive default spatial spring, retargeting at each settled end. The same scene runs on Linux desktop via the `mg-android-desktop` binary.
+Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders the dark expressive surface color with a primary-colored circle that bounces on the expressive default spatial spring, retargeting at each settled end. The same scene is reusable on Linux desktop through the public `mg_android::run_desktop` entry.
 
 CI builds two artifacts on every `main` push: `material-geek-apk` (debug, auto-generated debug key) and `material-geek-apk-release` (release, signed with the repo keystore and verified with `apksigner verify --print-certs`). Release signing keys live only in GitHub Secrets (`MATERIAL_GEEK_KEYSTORE_BASE64`, `MATERIAL_GEEK_KEYSTORE_PASSWORD`, plus reserved `MATERIAL_GEEK_KEY_ALIAS` and `MATERIAL_GEEK_KEY_PASSWORD`); no key material is committed.
 

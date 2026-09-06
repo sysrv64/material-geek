@@ -7,11 +7,7 @@ repository = "https://github.com/sysrv64/material-geek"
 rust-version = "1.86"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "mg-android-desktop"
-path = "src/main.rs"
+crate-type = ["cdylib"]
 
 [workspace]
 
