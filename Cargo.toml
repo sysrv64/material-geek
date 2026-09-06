@@ -18,8 +18,10 @@ repository = "https://github.com/sysrv64/material-geek"
 rust-version = "1.86"
 
 [workspace.dependencies]
-ab_glyph = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
+glyphon = "0.12"
+cosmic-text = "0.19"
+bytemuck = { version = "1.25", features = ["derive"] }
 wgpu = "30"
 mg-tokens = { path = "crates/mg-tokens" }
 mg-motion = { path = "crates/mg-motion" }

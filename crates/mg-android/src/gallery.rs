@@ -10,22 +10,21 @@ use std::time::Instant;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 use winit::window::Window;
 
-fn srgb_to_linear(byte: u8) -> f32 {
-    let f = byte as f32 / 255.0;
-    if f <= 0.04045 {
-        f / 12.92
-    } else {
-        ((f + 0.055) / 1.055).powf(2.4)
-    }
+fn srgb(byte: u8) -> f32 {
+    byte as f32 / 255.0
 }
 
 fn argb(argb: u32) -> [f32; 4] {
     [
-        srgb_to_linear(((argb >> 16) & 0xFF) as u8),
-        srgb_to_linear(((argb >> 8) & 0xFF) as u8),
-        srgb_to_linear((argb & 0xFF) as u8),
+        srgb(((argb >> 16) & 0xFF) as u8),
+        srgb(((argb >> 8) & 0xFF) as u8),
+        srgb((argb & 0xFF) as u8),
         1.0,
     ]
+}
+
+fn r4(r: f32) -> [f32; 4] {
+    [r, r, r, r]
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -59,13 +58,6 @@ impl Rect {
     fn contains(self, x: f32, y: f32) -> bool {
         x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
     }
-}
-
-fn frame(ui: &mut UiRenderer, r: Rect, radius: f32, t: f32, color: [f32; 4]) {
-    ui.rect(r.x, r.y, r.w, t, color, radius);
-    ui.rect(r.x, r.y + r.h - t, r.w, t, color, radius);
-    ui.rect(r.x, r.y, t, r.h, color, radius);
-    ui.rect(r.x + r.w - t, r.y, t, r.h, color, radius);
 }
 
 fn icon_c(ui: &mut UiRenderer, name: &str, cx: f32, cy: f32, px: f32, color: [f32; 4]) {
@@ -544,7 +536,7 @@ impl Gallery {
 
     fn layer(&self, ui: &mut UiRenderer, action: Action, rect: Rect, radius: f32, ink: [f32; 4]) {
         if self.is_pressed(action) {
-            ui.rect(rect.x, rect.y, rect.w, rect.h, with_alpha(ink, 0.10), radius);
+            ui.rect(rect.x, rect.y, rect.w, rect.h, with_alpha(ink, 0.10), r4(radius));
         }
     }
 
@@ -608,7 +600,7 @@ impl Gallery {
             ui.text(&name, pad, y, ts(M3_LABEL_MEDIUM, self.pal.sub, u));
             let body_h = Self::body_height(id, u);
             let card_y = y + 24.0 * u;
-            ui.rect(card_x, card_y, card_w, body_h + 32.0 * u, self.pal.card, 12.0 * u);
+            ui.rect(card_x, card_y, card_w, body_h + 32.0 * u, self.pal.card, r4(12.0 * u));
             self.draw_body(ui, id, card_x + 16.0 * u, card_y + 16.0 * u, card_w - 32.0 * u);
             y = card_y + body_h + 32.0 * u + 20.0 * u;
         }
@@ -619,7 +611,7 @@ impl Gallery {
 
     fn draw_app_bar(&mut self, ui: &mut UiRenderer, width: f32) {
         let u = self.u;
-        ui.rect(0.0, 0.0, width, 64.0 * u, self.pal.bg, 0.0);
+        ui.rect(0.0, 0.0, width, 64.0 * u, self.pal.bg, r4(0.0));
         self.icon_button(ui, 100, 4.0 * u, 12.0 * u, "menu", IconBtn::Standard);
         ui.text(
             "Component gallery",
@@ -629,7 +621,7 @@ impl Gallery {
         );
         self.icon_button(ui, 101, width - 88.0 * u, 12.0 * u, "search", IconBtn::Standard);
         self.icon_button(ui, 102, width - 44.0 * u, 12.0 * u, "more_vert", IconBtn::Standard);
-        ui.rect(0.0, 63.0 * u, width, 1.0 * u, self.pal.outline_variant, 0.5 * u);
+        ui.rect(0.0, 63.0 * u, width, 1.0 * u, self.pal.outline_variant, r4(0.5 * u));
     }
 
     fn body_height(id: ComponentId, u: f32) -> f32 {
@@ -713,19 +705,13 @@ impl Gallery {
             h * 0.5
         };
         if variant == Btn::Elevated {
-            ui.rect(x, y + 2.0 * u, w, h, with_alpha(self.pal.bg, 0.6), radius);
+            ui.rect(x, y + 2.0 * u, w, h, with_alpha(self.pal.bg, 0.6), r4(radius));
         }
         if let Some(f) = fill {
-            ui.rect(x, y, w, h, f, radius);
+            ui.rect(x, y, w, h, f, r4(radius));
         }
         if variant == Btn::Outlined {
-            frame(
-                ui,
-                Rect { x, y, w, h },
-                radius,
-                1.0 * u,
-                self.pal.outline,
-            );
+            ui.stroke(x, y, w, h, self.pal.outline, r4(radius), 1.0 * u);
         }
         self.layer(ui, Action::Button(id), Rect { x, y, w, h }, radius, ink);
         self.draw_ripples(ui, Rect { x, y, w, h });
@@ -764,10 +750,10 @@ impl Gallery {
             20.0 * u
         };
         if let Some(f) = fill {
-            ui.rect(x, y, s, s, f, radius);
+            ui.rect(x, y, s, s, f, r4(radius));
         }
         if border {
-            frame(ui, Rect { x, y, w: s, h: s }, radius, 1.0 * u, self.pal.outline);
+            ui.stroke(x, y, s, s, self.pal.outline, r4(radius), 1.0 * u);
         }
         self.layer(ui, Action::Button(id), Rect { x, y, w: s, h: s }, radius, ink);
         self.draw_ripples(ui, Rect { x, y, w: s, h: s });
@@ -788,8 +774,8 @@ impl Gallery {
         let radius = if size >= 56.0 * u { 16.0 * u } else { 12.0 * u };
         let e = self.elev_dp(action) * u;
         let ink = self.pal.on_primary_container;
-        ui.rect(x, y + e, size, size, with_alpha(self.pal.bg, 0.7), radius);
-        ui.rect(x, y, size, size, self.pal.primary_container, radius);
+        ui.rect(x, y + e, size, size, with_alpha(self.pal.bg, 0.7), r4(radius));
+        ui.rect(x, y, size, size, self.pal.primary_container, r4(radius));
         self.layer(ui, action, Rect { x, y, w: size, h: size }, radius, ink);
         self.draw_ripples(ui, Rect { x, y, w: size, h: size });
         icon_c(ui, icon, x + size * 0.5, y + size * 0.5, 24.0 * u, ink);
@@ -825,7 +811,7 @@ impl Gallery {
             w: w + ex,
             h,
         };
-        ui.rect(rect.x, rect.y, rect.w, rect.h, fill, radius);
+        ui.rect(rect.x, rect.y, rect.w, rect.h, fill, r4(radius));
         self.layer(ui, Action::Group(i), rect, radius, self.pal.text);
         self.draw_ripples(ui, rect);
         let style = ts(M3_LABEL_LARGE, ink, u);
@@ -841,25 +827,25 @@ impl Gallery {
         let cf = self.check_draw[i].x;
         let bx = x + 11.0 * u;
         let by = ry + 11.0 * u;
-        let box_rect = Rect { x: bx, y: by, w: 18.0 * u, h: 18.0 * u };
         let hit = Rect { x, y: ry, w: 40.0 * u, h: 40.0 * u };
         self.layer_circle(ui, Action::Check(i), x + 20.0 * u, ry + 20.0 * u, 20.0 * u, self.pal.text);
         self.draw_ripples(ui, hit);
         if ca > 0.0 {
-            ui.rect(bx, by, 18.0 * u, 18.0 * u, with_alpha(self.pal.primary, ca), 2.0 * u);
+            ui.rect(bx, by, 18.0 * u, 18.0 * u, with_alpha(self.pal.primary, ca), r4(2.0 * u));
         }
         if ca < 1.0 {
-            frame(ui, box_rect, 2.0 * u, 2.0 * u, with_alpha(self.pal.outline, 1.0 - ca));
+            ui.stroke(
+                bx,
+                by,
+                18.0 * u,
+                18.0 * u,
+                with_alpha(self.pal.outline, 1.0 - ca),
+                r4(2.0 * u),
+                2.0 * u,
+            );
         }
         if st == 2 {
-            ui.rect(
-                bx + 4.0 * u,
-                by + 8.0 * u,
-                10.0 * u,
-                2.0 * u,
-                with_alpha(self.pal.on_primary, ca),
-                1.0 * u,
-            );
+            ui.rect(bx + 4.0 * u, by + 8.0 * u, 10.0 * u, 2.0 * u, with_alpha(self.pal.on_primary, ca), r4(1.0 * u));
         } else if cf > 0.02 {
             icon_c(
                 ui,
@@ -887,16 +873,10 @@ impl Gallery {
         let ty = ry + 6.0 * u;
         let cy = ry + 22.0 * u;
         if on {
-            ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.primary, 16.0 * u);
+            ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.primary, r4(16.0 * u));
         } else {
-            ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.card_hi, 16.0 * u);
-            frame(
-                ui,
-                Rect { x, y: ty, w: 52.0 * u, h: 32.0 * u },
-                16.0 * u,
-                2.0 * u,
-                self.pal.outline,
-            );
+            ui.rect(x, ty, 52.0 * u, 32.0 * u, self.pal.card_hi, r4(16.0 * u));
+            ui.stroke(x, ty, 52.0 * u, 32.0 * u, self.pal.outline, r4(16.0 * u), 2.0 * u);
         }
         self.layer_circle(ui, Action::Switch(i), x + 26.0 * u, cy, 20.0 * u, self.pal.text);
         self.draw_ripples(ui, Rect { x, y: ry, w: 52.0 * u, h: 44.0 * u });
@@ -972,9 +952,9 @@ impl Gallery {
         let h = 32.0 * u;
         let rect = Rect { x, y, w, h };
         if sel {
-            ui.rect(x, y, w, h, self.pal.secondary_container, radius);
+            ui.rect(x, y, w, h, self.pal.secondary_container, r4(radius));
         } else {
-            frame(ui, rect, radius, 1.0 * u, self.pal.outline);
+            ui.stroke(x, y, w, h, self.pal.outline, r4(radius), 1.0 * u);
         }
         self.layer(ui, Action::Chip(i), rect, radius, self.pal.text);
         self.draw_ripples(ui, rect);
@@ -1053,8 +1033,8 @@ impl Gallery {
                 let fw = 16.0 * u + 24.0 * u + 8.0 * u + tw + 20.0 * u;
                 let e = self.elev_dp(Action::Button(21)) * u;
                 let rect = Rect { x, y, w: fw, h: 56.0 * u };
-                ui.rect(x, y + e, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), 16.0 * u);
-                ui.rect(x, y, fw, 56.0 * u, self.pal.primary_container, 16.0 * u);
+                ui.rect(x, y + e, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(16.0 * u));
+                ui.rect(x, y, fw, 56.0 * u, self.pal.primary_container, r4(16.0 * u));
                 self.layer(ui, Action::Button(21), rect, 16.0 * u, ink);
                 self.draw_ripples(ui, rect);
                 icon_c(ui, "edit", x + 16.0 * u + 12.0 * u, y + 28.0 * u, 24.0 * u, ink);
@@ -1095,10 +1075,9 @@ impl Gallery {
                 let fo = if self.morph_key == 61 { self.morph.x } else { 0.0 };
                 let rm = lerp(20.0 * u, 8.0 * u, fm);
                 let ro = lerp(20.0 * u, 8.0 * u, fo);
-                ui.rect(x, y, 132.0 * u, h, self.pal.primary, rm);
-                ui.rect(x + 132.0 * u, y, 52.0 * u, h, self.pal.primary, ro);
-                ui.rect(x + 132.0 * u, y, 26.0 * u, h, self.pal.primary, 0.0);
-                ui.rect(x + 131.0 * u, y + 10.0 * u, 1.0 * u, 20.0 * u, ink, 0.5 * u);
+                ui.rect(x, y, 132.0 * u, h, self.pal.primary, [rm, 0.0, 0.0, rm]);
+                ui.rect(x + 132.0 * u, y, 52.0 * u, h, self.pal.primary, [0.0, ro, ro, 0.0]);
+                ui.rect(x + 131.0 * u, y + 10.0 * u, 1.0 * u, 20.0 * u, ink, r4(0.5 * u));
                 let style = ts(M3_LABEL_LARGE, ink, u);
                 let ltw = ui.text_width("Send", style.px, style.medium, style.tracking_em);
                 ui.text("Send", x + (132.0 * u - ltw) * 0.5, y + h * 0.5 - style.line_h * 0.5, style);
@@ -1136,8 +1115,8 @@ impl Gallery {
             }
             ComponentId::Card => {
                 let e = self.elev_dp(Action::Button(30)) * u;
-                ui.rect(x, y + e, w, 140.0 * u, with_alpha(self.pal.bg, 0.7), 12.0 * u);
-                ui.rect(x, y, w, 140.0 * u, self.pal.card_hi, 12.0 * u);
+                ui.rect(x, y + e, w, 140.0 * u, with_alpha(self.pal.bg, 0.7), r4(12.0 * u));
+                ui.rect(x, y, w, 140.0 * u, self.pal.card_hi, r4(12.0 * u));
                 ui.text("Card headline", x + 16.0 * u, y + 16.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
                 ui.text(
                     "Supporting copy sits here and wraps the idea.",
@@ -1170,7 +1149,7 @@ impl Gallery {
                 ui.text(&pct, x, y, ts(M3_LABEL_LARGE, self.pal.sub, u));
                 let ty = y + 56.0 * u;
                 let bw = w;
-                ui.rect(x, ty - 8.0 * u, bw, 16.0 * u, self.pal.secondary_container, 8.0 * u);
+                ui.rect(x, ty - 8.0 * u, bw, 16.0 * u, self.pal.secondary_container, r4(8.0 * u));
                 let pressed = self.slider_drag;
                 let tw = if pressed {
                     2.0 * u
@@ -1180,12 +1159,12 @@ impl Gallery {
                 let tx = x + tw * 0.5 + (bw - tw) * self.slider;
                 let gap = 3.0 * u;
                 let aw = (tx - gap - x).max(0.0);
-                ui.rect(x, ty - 8.0 * u, aw, 16.0 * u, self.pal.primary, 8.0 * u);
+                ui.rect(x, ty - 8.0 * u, aw, 16.0 * u, self.pal.primary, r4(8.0 * u));
                 let sx = x + bw - 6.0 * u;
                 if sx > tx + gap {
                     ui.circle(sx, ty, 2.0 * u, self.pal.primary);
                 }
-                ui.rect(tx - tw * 0.5, ty - 22.0 * u, tw, 44.0 * u, self.pal.primary, tw * 0.5);
+                ui.rect(tx - tw * 0.5, ty - 22.0 * u, tw, 44.0 * u, self.pal.primary, r4(tw * 0.5));
                 self.zone(
                     Action::Slider,
                     Rect { x, y: y + 32.0 * u, w, h: 48.0 * u },
@@ -1193,11 +1172,11 @@ impl Gallery {
                 );
             }
             ComponentId::ProgressIndicator => {
-                ui.rect(x, y + 2.0 * u, w, 4.0 * u, self.pal.card_hi, 2.0 * u);
-                ui.rect(x, y + 2.0 * u, (w * self.slider).max(4.0 * u), 4.0 * u, self.pal.primary, 2.0 * u);
+                ui.rect(x, y + 2.0 * u, w, 4.0 * u, self.pal.card_hi, r4(2.0 * u));
+                ui.rect(x, y + 2.0 * u, (w * self.slider).max(4.0 * u), 4.0 * u, self.pal.primary, r4(2.0 * u));
                 ui.circle(x + w - 6.0 * u, y + 4.0 * u, 2.0 * u, self.pal.primary);
                 let pos = (self.t * 0.5 % 1.3) - 0.15;
-                ui.rect(x + w * pos, y + 16.0 * u, w * 0.3, 4.0 * u, self.pal.primary, 2.0 * u);
+                ui.rect(x + w * pos, y + 16.0 * u, w * 0.3, 4.0 * u, self.pal.primary, r4(2.0 * u));
                 self.arc(ui, x + 24.0 * u, y + 52.0 * u, 18.0 * u, -90.0, self.slider * 360.0);
                 let start = (self.t * 300.0) % 360.0;
                 self.arc(ui, x + 84.0 * u, y + 52.0 * u, 18.0 * u, start, 270.0);
@@ -1241,8 +1220,8 @@ impl Gallery {
             ComponentId::Dialog => {
                 let dw = 340.0 * u.min(w);
                 let dh = 200.0 * u;
-                ui.rect(x, y + 4.0 * u, dw, dh, with_alpha(self.pal.bg, 0.7), 28.0 * u);
-                ui.rect(x, y, dw, dh, self.pal.card_hi, 28.0 * u);
+                ui.rect(x, y + 4.0 * u, dw, dh, with_alpha(self.pal.bg, 0.7), r4(28.0 * u));
+                ui.rect(x, y, dw, dh, self.pal.card_hi, r4(28.0 * u));
                 icon_c(ui, "delete", x + dw * 0.5, y + 32.0 * u, 24.0 * u, self.pal.error);
                 text_c(
                     ui,
@@ -1272,8 +1251,8 @@ impl Gallery {
                 );
             }
             ComponentId::BottomSheet => {
-                ui.rect(x, y, w, 176.0 * u, self.pal.card_hi, 28.0 * u);
-                ui.rect(x + w * 0.5 - 16.0 * u, y + 8.0 * u, 32.0 * u, 4.0 * u, self.pal.outline, 2.0 * u);
+                ui.rect(x, y, w, 176.0 * u, self.pal.card_hi, r4(28.0 * u));
+                ui.rect(x + w * 0.5 - 16.0 * u, y + 8.0 * u, 32.0 * u, 4.0 * u, self.pal.outline, r4(2.0 * u));
                 let items = [("share", "Share"), ("link", "Copy link"), ("delete", "Remove")];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 24.0 * u + i as f32 * 48.0 * u;
@@ -1294,7 +1273,7 @@ impl Gallery {
                     ("settings", "Settings"),
                 ];
                 let cw = w / 5.0;
-                ui.rect(x, y, w, 80.0 * u, self.pal.card_hi, 12.0 * u);
+                ui.rect(x, y, w, 80.0 * u, self.pal.card_hi, r4(12.0 * u));
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let cx0 = x + i as f32 * cw;
                     let sel = self.nav == i;
@@ -1304,14 +1283,7 @@ impl Gallery {
                         self.pal.sub
                     };
                     if sel {
-                        ui.rect(
-                            cx0 + cw * 0.5 - 28.0 * u,
-                            y + 12.0 * u,
-                            56.0 * u,
-                            32.0 * u,
-                            self.pal.secondary_container,
-                            16.0 * u,
-                        );
+                        ui.rect(cx0 + cw * 0.5 - 28.0 * u, y + 12.0 * u, 56.0 * u, 32.0 * u, self.pal.secondary_container, r4(16.0 * u));
                     }
                     self.layer(ui, Action::Nav(i), Rect { x: cx0, y, w: cw, h: 80.0 * u }, 12.0 * u, self.pal.text);
                     self.draw_ripples(ui, Rect { x: cx0, y, w: cw, h: 80.0 * u });
@@ -1333,7 +1305,7 @@ impl Gallery {
                         self.pal.sub
                     };
                     if sel {
-                        ui.rect(x + 12.0 * u, iy + 4.0 * u, 56.0 * u, 32.0 * u, self.pal.secondary_container, 16.0 * u);
+                        ui.rect(x + 12.0 * u, iy + 4.0 * u, 56.0 * u, 32.0 * u, self.pal.secondary_container, r4(16.0 * u));
                     }
                     self.layer(ui, Action::Rail(i), Rect { x, y: iy, w: 80.0 * u, h: 56.0 * u }, 16.0 * u, self.pal.text);
                     self.draw_ripples(ui, Rect { x, y: iy, w: 80.0 * u, h: 56.0 * u });
@@ -1346,7 +1318,7 @@ impl Gallery {
             }
             ComponentId::NavigationDrawer => {
                 let dw = 280.0 * u;
-                ui.rect(x, y, dw, 288.0 * u, self.pal.card_hi, 12.0 * u);
+                ui.rect(x, y, dw, 288.0 * u, self.pal.card_hi, r4(12.0 * u));
                 ui.text("Geek Mail", x + 16.0 * u, y + 16.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
                 let items = [("mail", "Inbox"), ("send", "Sent"), ("edit", "Drafts"), ("delete", "Trash")];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
@@ -1358,7 +1330,7 @@ impl Gallery {
                         self.pal.text
                     };
                     if sel {
-                        ui.rect(x + 12.0 * u, iy, dw - 24.0 * u, 56.0 * u, self.pal.secondary_container, 28.0 * u);
+                        ui.rect(x + 12.0 * u, iy, dw - 24.0 * u, 56.0 * u, self.pal.secondary_container, r4(28.0 * u));
                     }
                     self.layer(ui, Action::Drawer(i), Rect { x: x + 12.0 * u, y: iy, w: dw - 24.0 * u, h: 56.0 * u }, 28.0 * u, self.pal.text);
                     self.draw_ripples(ui, Rect { x: x + 12.0 * u, y: iy, w: dw - 24.0 * u, h: 56.0 * u });
@@ -1369,22 +1341,22 @@ impl Gallery {
             }
             ComponentId::Scaffold => {
                 let sw = 320.0 * u.min(w);
-                ui.rect(x, y, sw, 64.0 * u, self.pal.card_hi, 12.0 * u);
-                ui.rect(x, y + 32.0 * u, sw, 32.0 * u, self.pal.card_hi, 0.0);
+                ui.rect(x, y, sw, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
+                ui.rect(x, y + 32.0 * u, sw, 32.0 * u, self.pal.card_hi, r4(0.0));
                 ui.text("Scaffold", x + 16.0 * u, y + 18.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
                 icon_c(ui, "more_vert", x + sw - 28.0 * u, y + 32.0 * u, 24.0 * u, self.pal.sub);
                 ui.text("Body content lives here.", x + 16.0 * u, y + 80.0 * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
                 let fy = y + 76.0 * u;
                 self.fab(ui, Action::Button(80), x + sw - 72.0 * u, fy, 56.0 * u, "add");
-                ui.rect(x, y + 152.0 * u, sw, 80.0 * u, self.pal.card_hi, 12.0 * u);
-                ui.rect(x, y + 152.0 * u, sw, 40.0 * u, self.pal.card_hi, 0.0);
+                ui.rect(x, y + 152.0 * u, sw, 80.0 * u, self.pal.card_hi, r4(12.0 * u));
+                ui.rect(x, y + 152.0 * u, sw, 40.0 * u, self.pal.card_hi, r4(0.0));
                 let icons = ["home", "search", "person"];
                 for (i, ic) in icons.into_iter().enumerate() {
                     icon_c(ui, ic, x + sw * 0.5 + (i as f32 - 1.0) * 64.0 * u, y + 192.0 * u, 24.0 * u, self.pal.sub);
                 }
             }
             ComponentId::TopAppBar => {
-                ui.rect(x, y, w, 64.0 * u, self.pal.card_hi, 12.0 * u);
+                ui.rect(x, y, w, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
                 self.icon_button(ui, 90, x + 4.0 * u, y + 12.0 * u, "arrow_back", IconBtn::Standard);
                 ui.text("Gallery", x + 56.0 * u, y + 18.0 * u, ts(M3_TITLE_LARGE, self.pal.text, u));
                 self.icon_button(ui, 91, x + w - 88.0 * u, y + 12.0 * u, "search", IconBtn::Standard);
@@ -1392,19 +1364,19 @@ impl Gallery {
             }
             ComponentId::SearchBar => {
                 let sw = 360.0 * u.min(w);
-                ui.rect(x, y + 2.0 * u, sw, 56.0 * u, with_alpha(self.pal.bg, 0.7), 28.0 * u);
-                ui.rect(x, y, sw, 56.0 * u, self.pal.card_hi, 28.0 * u);
-                icon_c(ui, "search", x + 20.0 * u, y + 28.0 * u, 24.0 * u, self.pal.sub);
-                ui.text("Search components", x + 52.0 * u, y + 16.0 * u, ts(M3_BODY_LARGE, self.pal.sub, u));
+                ui.rect(x, y + 2.0 * u, sw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(28.0 * u));
+                ui.rect(x, y, sw, 56.0 * u, self.pal.card_hi, r4(28.0 * u));
                 let a = Action::Button(93);
                 self.layer(ui, a, Rect { x, y, w: sw, h: 56.0 * u }, 28.0 * u, self.pal.text);
                 self.draw_ripples(ui, Rect { x, y, w: sw, h: 56.0 * u });
+                icon_c(ui, "search", x + 20.0 * u, y + 28.0 * u, 24.0 * u, self.pal.sub);
+                ui.text("Search components", x + 52.0 * u, y + 16.0 * u, ts(M3_BODY_LARGE, self.pal.sub, u));
                 self.zone(a, Rect { x, y, w: sw, h: 56.0 * u }, self.pal.text);
             }
             ComponentId::TextField => {
                 let f = self.focus.x;
-                ui.rect(x, y, w, 56.0 * u, self.pal.card_hi, 4.0 * u);
-                ui.rect(x, y + 28.0 * u, w, 28.0 * u, self.pal.card_hi, 0.0);
+                ui.rect(x, y, w, 56.0 * u, self.pal.card_hi, r4(4.0 * u));
+                ui.rect(x, y + 28.0 * u, w, 28.0 * u, self.pal.card_hi, r4(0.0));
                 ui.text(
                     "Label",
                     x + 16.0 * u,
@@ -1413,24 +1385,17 @@ impl Gallery {
                 );
                 ui.text("Hello geek", x + 16.0 * u, y + 26.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
                 let ih = 1.0 * u + f;
-                ui.rect(
-                    x,
-                    y + 56.0 * u - ih,
-                    w,
-                    ih,
-                    mix(self.pal.outline, self.pal.primary, f),
-                    0.0,
-                );
+                ui.rect(x, y + 56.0 * u - ih, w, ih, mix(self.pal.outline, self.pal.primary, f), r4(0.0));
                 let oy = y + 76.0 * u;
-                frame(ui, Rect { x, y: oy, w, h: 56.0 * u }, 4.0 * u, 1.0 * u, self.pal.outline);
+                ui.stroke(x, oy, w, 56.0 * u, self.pal.outline, r4(4.0 * u), 1.0 * u);
                 ui.text("Outlined", x + 16.0 * u, oy + 6.0 * u, ts(M3_BODY_SMALL, self.pal.sub, u));
                 ui.text("secret", x + 16.0 * u, oy + 26.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
                 icon_c(ui, "visibility_off", x + w - 28.0 * u, oy + 28.0 * u, 24.0 * u, self.pal.sub);
             }
             ComponentId::Menu => {
                 let mw = 240.0 * u;
-                ui.rect(x, y + 2.0 * u, mw, 200.0 * u, with_alpha(self.pal.bg, 0.7), 4.0 * u);
-                ui.rect(x, y, mw, 200.0 * u, self.pal.card_hi, 4.0 * u);
+                ui.rect(x, y + 2.0 * u, mw, 200.0 * u, with_alpha(self.pal.bg, 0.7), r4(4.0 * u));
+                ui.rect(x, y, mw, 200.0 * u, self.pal.card_hi, r4(4.0 * u));
                 let items = [("edit", "Rename"), ("share", "Share"), ("link", "Copy link"), ("delete", "Delete")];
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 4.0 * u + i as f32 * 48.0 * u;
@@ -1441,7 +1406,7 @@ impl Gallery {
                         self.pal.text
                     };
                     if sel {
-                        ui.rect(x + 4.0 * u, iy, mw - 8.0 * u, 48.0 * u, self.pal.secondary_container, 4.0 * u);
+                        ui.rect(x + 4.0 * u, iy, mw - 8.0 * u, 48.0 * u, self.pal.secondary_container, r4(4.0 * u));
                     }
                     let rect = Rect { x: x + 4.0 * u, y: iy, w: mw - 8.0 * u, h: 48.0 * u };
                     self.layer(ui, Action::MenuItem(i), rect, 4.0 * u, self.pal.text);
@@ -1471,7 +1436,7 @@ impl Gallery {
                     } else {
                         self.pal.text
                     };
-                    ui.rect(cx0, cy, cw, ch, fill, 12.0 * u);
+                    ui.rect(cx0, cy, cw, ch, fill, r4(12.0 * u));
                     icon_c(ui, "image", cx0 + cw * 0.5, cy + ch * 0.4, 24.0 * u, ink);
                     let label = format!("Item {}", i + 1);
                     ui.text(&label, cx0 + 12.0 * u, cy + ch - 32.0 * u, ts(M3_BODY_MEDIUM, ink, u));
@@ -1508,12 +1473,14 @@ impl Gallery {
                     if sel {
                         ui.circle(gx, gy, 20.0 * u, self.pal.primary);
                     } else if today {
-                        frame(
-                            ui,
-                            Rect { x: gx - 18.0 * u, y: gy - 18.0 * u, w: 36.0 * u, h: 36.0 * u },
-                            18.0 * u,
-                            1.0 * u,
+                        ui.stroke(
+                            gx - 18.0 * u,
+                            gy - 18.0 * u,
+                            36.0 * u,
+                            36.0 * u,
                             self.pal.outline,
+                            r4(18.0 * u),
+                            1.0 * u,
                         );
                     }
                     let label = format!("{}", day + 1);
@@ -1545,7 +1512,7 @@ impl Gallery {
                         ts(M3_LABEL_LARGE, self.pal.text, u),
                     );
                 }
-                ui.rect(cx - 2.0 * u, cy - 56.0 * u, 4.0 * u, 56.0 * u, self.pal.primary, 2.0 * u);
+                ui.rect(cx - 2.0 * u, cy - 56.0 * u, 4.0 * u, 56.0 * u, self.pal.primary, r4(2.0 * u));
                 let hand = 306.0f32.to_radians();
                 for k in 1..=9 {
                     let rr = k as f32 * 4.0 * u;
@@ -1556,7 +1523,7 @@ impl Gallery {
                 ui.text("AM", x + 216.0 * u, y + 122.0 * u, ts(M3_LABEL_LARGE, self.pal.sub, u));
             }
             ComponentId::Tooltip => {
-                ui.rect(x + 40.0 * u, y, 132.0 * u, 32.0 * u, self.pal.inverse, 4.0 * u);
+                ui.rect(x + 40.0 * u, y, 132.0 * u, 32.0 * u, self.pal.inverse, r4(4.0 * u));
                 text_c(
                     ui,
                     "Plain tooltip",
@@ -1564,27 +1531,29 @@ impl Gallery {
                     y + 8.0 * u,
                     ts(M3_BODY_SMALL, self.pal.on_inverse, u),
                 );
-                ui.rect(x + 40.0 * u, y + 44.0 * u, 280.0 * u, 64.0 * u, self.pal.card_hi, 12.0 * u);
-                frame(
-                    ui,
-                    Rect { x: x + 40.0 * u, y: y + 44.0 * u, w: 280.0 * u, h: 64.0 * u },
-                    12.0 * u,
-                    1.0 * u,
+                ui.rect(x + 40.0 * u, y + 44.0 * u, 280.0 * u, 64.0 * u, self.pal.card_hi, r4(12.0 * u));
+                ui.stroke(
+                    x + 40.0 * u,
+                    y + 44.0 * u,
+                    280.0 * u,
+                    64.0 * u,
                     self.pal.outline_variant,
+                    r4(12.0 * u),
+                    1.0 * u,
                 );
                 ui.text("Rich tooltip", x + 56.0 * u, y + 52.0 * u, ts(M3_TITLE_MEDIUM, self.pal.text, u));
                 ui.text("Long press an item to show this.", x + 56.0 * u, y + 76.0 * u, ts(M3_BODY_SMALL, self.pal.sub, u));
             }
             ComponentId::Snackbar => {
-                ui.rect(x, y + 8.0 * u, w, 48.0 * u, self.pal.inverse, 4.0 * u);
-                ui.text("Message sent", x + 16.0 * u, y + 22.0 * u, ts(M3_BODY_MEDIUM, self.pal.on_inverse, u));
+                ui.rect(x, y + 8.0 * u, w, 48.0 * u, self.pal.inverse, r4(4.0 * u));
                 let st = ts(M3_LABEL_LARGE, self.pal.inverse_primary, u);
                 let tw = ui.text_width("Undo", st.px, st.medium, st.tracking_em);
-                ui.text("Undo", x + w - 16.0 * u - tw, y + 22.0 * u, st);
                 let a = Action::Button(96);
                 let rect = Rect { x: x + w - 16.0 * u - tw - 8.0 * u, y: y + 8.0 * u, w: tw + 16.0 * u, h: 48.0 * u };
                 self.layer(ui, a, rect, 4.0 * u, self.pal.inverse_primary);
                 self.draw_ripples(ui, rect);
+                ui.text("Message sent", x + 16.0 * u, y + 22.0 * u, ts(M3_BODY_MEDIUM, self.pal.on_inverse, u));
+                ui.text("Undo", x + w - 16.0 * u - tw, y + 22.0 * u, st);
                 self.zone(a, rect, self.pal.inverse_primary);
             }
             ComponentId::Badge => {
@@ -1638,7 +1607,7 @@ impl Gallery {
                     icon_c(ui, ic, tx + tw2 * 0.5, y + 20.0 * u, 24.0 * u, col);
                     text_c(ui, lb, tx + tw2 * 0.5, y + 36.0 * u, ts(M3_TITLE_SMALL, col, u));
                     if sel {
-                        ui.rect(tx + 24.0 * u, y + 61.0 * u, tw2 - 48.0 * u, 3.0 * u, self.pal.primary, 1.5 * u);
+                        ui.rect(tx + 24.0 * u, y + 61.0 * u, tw2 - 48.0 * u, 3.0 * u, self.pal.primary, r4(1.5 * u));
                     }
                     let rect = Rect { x: tx, y, w: tw2, h: 64.0 * u };
                     self.layer(ui, Action::Tab(i), rect, 0.0, self.pal.text);
@@ -1649,15 +1618,30 @@ impl Gallery {
             ComponentId::SegmentedButton => {
                 let labels = ["On", "Off", "Auto"];
                 let sw = w / 3.0;
-                frame(ui, Rect { x, y, w, h: 40.0 * u }, 20.0 * u, 1.0 * u, self.pal.outline);
+                ui.stroke(x, y, w, 40.0 * u, self.pal.outline, r4(20.0 * u), 1.0 * u);
                 for (i, lb) in labels.into_iter().enumerate() {
                     let sx = x + i as f32 * sw;
                     let sel = self.segmented == i;
                     if sel {
-                        ui.rect(sx + 1.0 * u, y + 1.0 * u, sw - 2.0 * u, 38.0 * u, self.pal.secondary_container, 0.0);
+                        let end = 19.0 * u;
+                        let fill_r = if i == 0 {
+                            [end, 0.0, 0.0, end]
+                        } else if i == labels.len() - 1 {
+                            [0.0, end, end, 0.0]
+                        } else {
+                            r4(0.0)
+                        };
+                        ui.rect(
+                            sx + 1.0 * u,
+                            y + 1.0 * u,
+                            sw - 2.0 * u,
+                            38.0 * u,
+                            self.pal.secondary_container,
+                            fill_r,
+                        );
                     }
                     if i > 0 && self.segmented != i && self.segmented != i - 1 {
-                        ui.rect(sx - 0.5 * u, y + 8.0 * u, 1.0 * u, 24.0 * u, self.pal.outline, 0.0);
+                        ui.rect(sx - 0.5 * u, y + 8.0 * u, 1.0 * u, 24.0 * u, self.pal.outline, r4(0.0));
                     }
                     let ink = if sel {
                         self.pal.on_secondary_container
@@ -1679,7 +1663,7 @@ impl Gallery {
                 }
             }
             ComponentId::Divider => {
-                ui.rect(x, y + 12.0 * u, w, 1.0 * u, self.pal.outline_variant, 0.5 * u);
+                ui.rect(x, y + 12.0 * u, w, 1.0 * u, self.pal.outline_variant, r4(0.5 * u));
             }
             ComponentId::PullToRefresh => {
                 let start = (self.t * 240.0) % 360.0;
@@ -1687,20 +1671,20 @@ impl Gallery {
                 ui.text("Pull down to refresh", x + 64.0 * u, y + 14.0 * u, ts(M3_BODY_MEDIUM, self.pal.sub, u));
             }
             ComponentId::SwipeToDismiss => {
-                ui.rect(x, y + 4.0 * u, w, 56.0 * u, self.pal.error, 12.0 * u);
+                ui.rect(x, y + 4.0 * u, w, 56.0 * u, self.pal.error, r4(12.0 * u));
                 icon_c(ui, "delete", x + w - 32.0 * u, y + 32.0 * u, 24.0 * u, self.pal.on_error);
                 ui.text("Delete", x + w - 108.0 * u, y + 22.0 * u, ts(M3_LABEL_LARGE, self.pal.on_error, u));
                 let fw = w - 90.0 * u;
-                ui.rect(x, y + 6.0 * u, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), 12.0 * u);
-                ui.rect(x, y + 4.0 * u, fw, 56.0 * u, self.pal.card_hi, 12.0 * u);
+                ui.rect(x, y + 6.0 * u, fw, 56.0 * u, with_alpha(self.pal.bg, 0.7), r4(12.0 * u));
+                ui.rect(x, y + 4.0 * u, fw, 56.0 * u, self.pal.card_hi, r4(12.0 * u));
                 ui.text("Swipe me away", x + 16.0 * u, y + 22.0 * u, ts(M3_BODY_LARGE, self.pal.text, u));
                 icon_c(ui, "mail", x + fw - 32.0 * u, y + 32.0 * u, 24.0 * u, self.pal.sub);
             }
             ComponentId::Toolbar => {
                 let icons = ["edit", "palette", "brush", "more_vert"];
                 let tw3 = 4.0 * 40.0 * u + 8.0 * u;
-                ui.rect(x, y + 2.0 * u, tw3, 52.0 * u, with_alpha(self.pal.bg, 0.7), 26.0 * u);
-                ui.rect(x, y, tw3, 52.0 * u, self.pal.card_hi, 26.0 * u);
+                ui.rect(x, y + 2.0 * u, tw3, 52.0 * u, with_alpha(self.pal.bg, 0.7), r4(26.0 * u));
+                ui.rect(x, y, tw3, 52.0 * u, self.pal.card_hi, r4(26.0 * u));
                 for (i, ic) in icons.into_iter().enumerate() {
                     self.icon_button(ui, 40 + i as u32, x + 4.0 * u + i as f32 * 40.0 * u, y + 6.0 * u, ic, IconBtn::Standard);
                 }
@@ -1774,9 +1758,15 @@ impl GalleryApp {
         };
         let caps = surface.get_capabilities(&adapter);
         let size = window.inner_size();
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(wgpu::TextureFormat::is_srgb)
+            .unwrap_or(TextureFormat::Bgra8UnormSrgb);
         let config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
-            format: caps.formats.first().copied().unwrap_or(TextureFormat::Bgra8Unorm),
+            format,
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -1790,8 +1780,8 @@ impl GalleryApp {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        let mut renderer = UiRenderer::new(&device, config.format);
-        renderer.set_screen(&queue, config.width as f32, config.height as f32);
+        let mut renderer = UiRenderer::new(&device, &queue, config.format);
+        renderer.set_screen(&device, &queue, config.width as f32, config.height as f32);
         info!("gallery renderer ready {}x{}", config.width, config.height);
         self.ui = Some(UiInner {
             window,
@@ -1814,7 +1804,12 @@ impl GalleryApp {
             ui.config.height = height.max(1);
             ui.surface.configure(&ui.device, &ui.config);
             ui.renderer
-                .set_screen(&ui.queue, ui.config.width as f32, ui.config.height as f32);
+                .set_screen(
+                    &ui.device,
+                    &ui.queue,
+                    ui.config.width as f32,
+                    ui.config.height as f32,
+                );
         }
     }
 
@@ -1830,6 +1825,7 @@ impl GalleryApp {
             ui.config.height = size.height.max(1);
             ui.surface.configure(&ui.device, &ui.config);
             ui.renderer.set_screen(
+                &ui.device,
                 &ui.queue,
                 ui.config.width as f32,
                 ui.config.height as f32,
@@ -1844,6 +1840,7 @@ impl GalleryApp {
                 ui.config.height = size.height.max(1);
                 ui.surface.configure(&ui.device, &ui.config);
                 ui.renderer.set_screen(
+                    &ui.device,
                     &ui.queue,
                     ui.config.width as f32,
                     ui.config.height as f32,
