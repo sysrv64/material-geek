@@ -142,16 +142,14 @@ pub fn run_desktop() {
 }
 
 #[cfg(target_os = "android")]
-fn build_event_loop(
-    app: AndroidApp,
-) -> Option<EventLoop<()>> {
+fn build_event_loop(app: AndroidApp) -> Option<EventLoop<()>> {
     let mut builder = EventLoop::builder();
     builder.with_android_app(app.clone());
     match builder.build() {
         Ok(event_loop) => Some(event_loop),
         Err(winit::error::EventLoopError::RecreationAttempt) => {
             error!("previous event loop still alive, waiting for clean exit");
-            for _ in 0..200 {
+            for _ in 0..40 {
                 std::thread::sleep(Duration::from_millis(25));
                 if !LOOP_ALIVE.load(Ordering::SeqCst) {
                     let mut retry = EventLoop::builder();
@@ -168,8 +166,8 @@ fn build_event_loop(
                     }
                 }
             }
-            error!("previous event loop did not exit in time, android thread ending");
-            None
+            error!("previous loop is a zombie, exiting process immediately");
+            unsafe { libc::_exit(0) }
         }
         Err(err) => {
             error!("event loop creation failed: {err:?}");

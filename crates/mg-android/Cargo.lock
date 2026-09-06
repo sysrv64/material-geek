@@ -926,6 +926,7 @@ name = "mg-android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "libc",
  "log",
  "mg-components",
  "mg-motion",
