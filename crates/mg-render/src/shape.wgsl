@@ -74,13 +74,13 @@ fn fs(in: VOut) -> @location(0) vec4f {
     if (in.stroke_w <= 0.0) {
         stroke_a = 0.0;
     }
-    let fill = vec4f(
+    var fill = vec4f(
         srgb_to_linear(in.fill_col.r),
         srgb_to_linear(in.fill_col.g),
         srgb_to_linear(in.fill_col.b),
         in.fill_col.a,
     );
-    let stroke = vec4f(
+    var stroke = vec4f(
         srgb_to_linear(in.stroke_col.r),
         srgb_to_linear(in.stroke_col.g),
         srgb_to_linear(in.stroke_col.b),

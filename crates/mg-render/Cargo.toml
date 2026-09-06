@@ -12,3 +12,6 @@ glyphon = { workspace = true }
 cosmic-text = { workspace = true }
 bytemuck = { workspace = true }
 log = "0.4"
+
+[dev-dependencies]
+naga = "30.0.1"

@@ -327,4 +327,17 @@ mod tests {
         assert_eq!(M3_DISPLAY_LARGE.px, 57.0);
         assert_eq!(M3_BODY_LARGE.line_h, 24.0);
     }
+
+    #[test]
+    fn shape_wgsl_parses_and_validates() {
+        let module =
+            naga::front::wgsl::parse_str(shape::SHADER).expect("shape.wgsl must parse with naga");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        );
+        validator
+            .validate(&module)
+            .expect("shape.wgsl must pass naga validation");
+    }
 }
