@@ -1,16 +1,17 @@
+use log::{error, info};
 use mg_motion::{DynamicSpring, MotionScheme, Tempo, Track};
 use mg_theme::GeekTheme;
 use std::sync::Arc;
 use wgpu::{
-    BindGroupDescriptor, BindGroupEntry, BindingResource, BlendState, BufferBinding,
+    Adapter, BindGroupDescriptor, BindGroupEntry, BindingResource, BlendState, BufferBinding,
     BufferDescriptor, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
-    CurrentSurfaceTexture, Device, DeviceDescriptor, ExperimentalFeatures, Features, FragmentState,
-    Instance, InstanceDescriptor, Limits, LoadOp, MemoryHints, MultisampleState, Operations,
-    PipelineLayoutDescriptor, PowerPreference, PresentMode, PrimitiveState, Queue,
+    CompositeAlphaMode, CurrentSurfaceTexture, Device, DeviceDescriptor, ExperimentalFeatures,
+    Features, FragmentState, Instance, InstanceDescriptor, LoadOp, MemoryHints, MultisampleState,
+    Operations, PipelineLayoutDescriptor, PowerPreference, PresentMode, PrimitiveState, Queue,
     RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource, StoreOp, Surface,
-    SurfaceColorSpace, SurfaceConfiguration, TextureUsages, TextureViewDescriptor, Trace,
-    VertexState,
+    SurfaceColorSpace, SurfaceConfiguration, TextureFormat, TextureUsages, TextureViewDescriptor,
+    Trace, VertexState,
 };
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -78,6 +79,41 @@ fn uniform_bytes(bg: [f32; 4], fg: [f32; 4], circle: [f32; 4]) -> [u8; 48] {
     out
 }
 
+fn init_logging() {
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_tag("material-geek")
+            .with_max_level(log::LevelFilter::Debug),
+    );
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic: {info}");
+        previous(info);
+    }));
+}
+
+fn request_adapter(instance: &Instance, surface: &Surface<'static>) -> Option<Adapter> {
+    let options = RequestAdapterOptions {
+        power_preference: PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: Some(surface),
+        apply_limit_buckets: false,
+    };
+    if let Ok(adapter) = pollster::block_on(instance.request_adapter(&options)) {
+        return Some(adapter);
+    }
+    error!("high performance adapter unavailable, trying fallback");
+    pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+        power_preference: PowerPreference::LowPower,
+        force_fallback_adapter: true,
+        compatible_surface: Some(surface),
+        apply_limit_buckets: false,
+    }))
+    .map_err(|err| error!("adapter request failed: {err:?}"))
+    .ok()
+}
+
 struct RenderState {
     window: Arc<Window>,
     surface: Surface<'static>,
@@ -93,36 +129,51 @@ struct RenderState {
 }
 
 impl RenderState {
-    fn new(window: Arc<Window>, theme: &GeekTheme) -> Self {
+    fn new(window: Arc<Window>, theme: &GeekTheme) -> Option<Self> {
         let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
-        let surface = instance.create_surface(window.clone()).expect("surface");
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-            apply_limit_buckets: false,
-        }))
-        .expect("adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
+        let surface = match instance.create_surface(window.clone()) {
+            Ok(surface) => surface,
+            Err(err) => {
+                error!("surface creation failed: {err:?}");
+                return None;
+            }
+        };
+        let adapter = request_adapter(&instance, &surface)?;
+        let (device, queue) = match pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: None,
             required_features: Features::empty(),
-            required_limits: Limits::default(),
+            required_limits: adapter.limits(),
             experimental_features: ExperimentalFeatures::disabled(),
             memory_hints: MemoryHints::Performance,
             trace: Trace::Off,
-        }))
-        .expect("device");
+        })) {
+            Ok(pair) => pair,
+            Err(err) => {
+                error!("device request failed: {err:?}");
+                return None;
+            }
+        };
         let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .first()
+            .copied()
+            .unwrap_or(TextureFormat::Bgra8Unorm);
+        let alpha = caps
+            .alpha_modes
+            .first()
+            .copied()
+            .unwrap_or(CompositeAlphaMode::Auto);
         let size = window.inner_size();
         let config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
-            format: caps.formats[0],
+            format,
             color_space: SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode: alpha,
             view_formats: vec![],
         };
         surface.configure(&device, &config);
@@ -185,7 +236,11 @@ impl RenderState {
         let bg = argb_to_linear(theme.scheme.surface.0);
         let fg = argb_to_linear(theme.scheme.primary.0);
         let spec = MotionScheme::expressive().spec(Tempo::Default, Track::Spatial);
-        Self {
+        info!(
+            "renderer ready {}x{} format={:?}",
+            config.width, config.height, config.format
+        );
+        Some(Self {
             window,
             surface,
             device,
@@ -197,7 +252,7 @@ impl RenderState {
             bg,
             fg,
             spring: DynamicSpring::new(0.0, 1.0, spec),
-        }
+        })
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -291,16 +346,28 @@ impl ApplicationHandler for GeekApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(ControlFlow::Poll);
         if self.state.is_none() {
-            let window = Arc::new(
-                event_loop
-                    .create_window(Window::default_attributes())
-                    .expect("window"),
+            let window = match event_loop.create_window(Window::default_attributes()) {
+                Ok(window) => Arc::new(window),
+                Err(err) => {
+                    error!("window creation failed: {err:?}");
+                    event_loop.exit();
+                    return;
+                }
+            };
+            info!(
+                "resumed with window {}x{}",
+                window.inner_size().width,
+                window.inner_size().height
             );
-            self.state = Some(RenderState::new(window, &self.theme));
+            match RenderState::new(window, &self.theme) {
+                Some(state) => self.state = Some(state),
+                None => event_loop.exit(),
+            }
         }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        info!("suspended, dropping surface");
         self.state = None;
     }
 
@@ -329,6 +396,7 @@ impl ApplicationHandler for GeekApp {
 
 #[cfg(not(target_os = "android"))]
 pub fn run_desktop() {
+    init_logging();
     let event_loop = EventLoop::builder().build().expect("event loop");
     let mut handler = GeekApp::new();
     let _ = event_loop.run_app(&mut handler);
@@ -337,6 +405,8 @@ pub fn run_desktop() {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    init_logging();
+    info!("material-geek android entry");
     if let Some(dir) = app.internal_data_path() {
         let theme = GeekTheme::dark_expressive();
         let payload = format!(
@@ -348,7 +418,16 @@ fn android_main(app: AndroidApp) {
     }
     let mut builder = EventLoop::builder();
     builder.with_android_app(app);
-    let event_loop = builder.build().expect("event loop");
+    let event_loop = match builder.build() {
+        Ok(event_loop) => event_loop,
+        Err(err) => {
+            error!("event loop creation failed: {err:?}");
+            return;
+        }
+    };
     let mut handler = GeekApp::new();
-    let _ = event_loop.run_app(&mut handler);
+    if let Err(err) = event_loop.run_app(&mut handler) {
+        error!("event loop exited with error: {err:?}");
+    }
+    info!("material-geek android exit");
 }

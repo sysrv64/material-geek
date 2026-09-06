@@ -12,11 +12,15 @@ crate-type = ["cdylib"]
 [workspace]
 
 [dependencies]
+log = "0.4"
 mg-motion = { path = "../mg-motion" }
 mg-theme = { path = "../mg-theme" }
 pollster = "1"
 wgpu = "30"
 winit = { version = "0.30", features = ["android-native-activity"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
 
 [package.metadata.android]
 use_aapt2 = true

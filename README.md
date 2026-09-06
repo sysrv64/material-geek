@@ -62,9 +62,17 @@ Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The sh
 
 CI builds two artifacts on every `main` push: `material-geek-apk` (debug, auto-generated debug key) and `material-geek-apk-release` (release, signed with the repo keystore and verified with `apksigner verify --print-certs`). Release signing keys live only in GitHub Secrets (`MATERIAL_GEEK_KEYSTORE_BASE64`, `MATERIAL_GEEK_KEYSTORE_PASSWORD`, plus reserved `MATERIAL_GEEK_KEY_ALIAS` and `MATERIAL_GEEK_KEY_PASSWORD`); no key material is committed.
 
+On-device logs use the `material-geek` tag with a panic hook that forwards to logcat:
+
+```bash
+adb logcat -s material-geek
+```
+
+Init failures (surface, adapter, device) are logged instead of panicking, the adapter request falls back from high-performance to low-power with fallback adapter, and the device is requested with the adapter's own limits rather than desktop defaults.
+
 ## Dependencies
 
-Single runtime dependency: `serde 1.0.229`, verified as the latest stable release on crates.io. No dependency on egui, iced, dioxus, winit, or wgpu in v0.1. Render-adapter crates (winit, wgpu, layout, text) are scheduled for v0.2 with pinned versions resolved at that time.
+Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`, all verified as latest stable releases on crates.io.
 
 ## License
 
