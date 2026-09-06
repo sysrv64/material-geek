@@ -7,7 +7,7 @@ use wgpu::{
     BufferDescriptor, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoderDescriptor,
     CompositeAlphaMode, CurrentSurfaceTexture, Device, DeviceDescriptor, ExperimentalFeatures,
     Features, FragmentState, Instance, InstanceDescriptor, LoadOp, MemoryHints, MultisampleState,
-    Operations, PipelineLayoutDescriptor, PowerPreference, PresentMode, PrimitiveState, Queue,
+    Operations, PowerPreference, PresentMode, PrimitiveState, Queue,
     RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
     RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource, StoreOp, Surface,
     SurfaceColorSpace, SurfaceConfiguration, TextureFormat, TextureUsages, TextureViewDescriptor,
@@ -36,10 +36,15 @@ struct VsOut {
 };
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> VsOut {
-    var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+    var pos = vec2f(-1.0, -1.0);
+    if (i == 1u) {
+        pos = vec2f(3.0, -1.0);
+    } else if (i == 2u) {
+        pos = vec2f(-1.0, 3.0);
+    }
     var out: VsOut;
-    out.pos = vec4f(p[i], 0.0, 1.0);
-    out.uv = p[i] * 0.5 + vec2f(0.5, 0.5);
+    out.pos = vec4f(pos, 0.0, 1.0);
+    out.uv = pos * 0.5 + vec2f(0.5, 0.5);
     return out;
 }
 @fragment
@@ -48,7 +53,7 @@ fn fs(in: VsOut) -> @location(0) vec4f {
     let p = vec2f(in.uv.x * aspect, in.uv.y);
     let c = vec2f(scene.circle.x * aspect, scene.circle.y);
     let d = distance(p, c);
-    let edge = smoothstep(scene.circle.z, scene.circle.z - 0.008, d);
+    let edge = 1.0 - smoothstep(scene.circle.z - 0.008, scene.circle.z, d);
     return mix(scene.bg, scene.fg, edge);
 }
 "#;
@@ -130,6 +135,7 @@ struct RenderState {
 
 impl RenderState {
     fn new(window: Arc<Window>, theme: &GeekTheme) -> Option<Self> {
+        let started = std::time::Instant::now();
         let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let surface = match instance.create_surface(window.clone()) {
             Ok(surface) => surface,
@@ -138,7 +144,9 @@ impl RenderState {
                 return None;
             }
         };
+        info!("stage surface ok in {}ms", started.elapsed().as_millis());
         let adapter = request_adapter(&instance, &surface)?;
+        info!("stage adapter ok in {}ms", started.elapsed().as_millis());
         let (device, queue) = match pollster::block_on(adapter.request_device(&DeviceDescriptor {
             label: None,
             required_features: Features::empty(),
@@ -177,24 +185,21 @@ impl RenderState {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        info!("stage device ok in {}ms", started.elapsed().as_millis());
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: None,
             source: ShaderSource::Wgsl(SHADER.into()),
         });
+        info!("stage shader ok in {}ms", started.elapsed().as_millis());
         let uniform_buf = device.create_buffer(&BufferDescriptor {
             label: None,
             size: 48,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[],
-            immediate_size: 0,
-        });
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
-            layout: Some(&layout),
+            layout: None,
             vertex: VertexState {
                 module: &shader,
                 entry_point: None,
@@ -237,8 +242,11 @@ impl RenderState {
         let fg = argb_to_linear(theme.scheme.primary.0);
         let spec = MotionScheme::expressive().spec(Tempo::Default, Track::Spatial);
         info!(
-            "renderer ready {}x{} format={:?}",
-            config.width, config.height, config.format
+            "renderer ready {}x{} format={:?} in {}ms",
+            config.width,
+            config.height,
+            config.format,
+            started.elapsed().as_millis()
         );
         Some(Self {
             window,
