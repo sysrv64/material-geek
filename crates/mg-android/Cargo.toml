@@ -1,0 +1,43 @@
+[package]
+name = "mg-android"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/sysrv64/material-geek"
+rust-version = "1.86"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mg-motion = { path = "../mg-motion" }
+mg-theme = { path = "../mg-theme" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+
+[package.metadata.android]
+use_aapt2 = true
+package = "dev.geek.material"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 24
+target_sdk_version = 35
+
+[package.metadata.android.application]
+has_code = false
+label = "MaterialGeek"
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout"
+exported = true
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "mg_android"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]

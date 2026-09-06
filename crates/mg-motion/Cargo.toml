@@ -1,0 +1,11 @@
+[package]
+name = "mg-motion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek Dynamic Motion: analytic spring physics + cubic-bezier easings (M3E MotionScheme, better than tween)"
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+mg-tokens = { workspace = true }

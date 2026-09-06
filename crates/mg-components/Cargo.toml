@@ -1,0 +1,11 @@
+[package]
+name = "mg-components"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek headless components: state + props for all 40 M3E components (render adapters in v0.2)"
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+mg-tokens = { workspace = true }

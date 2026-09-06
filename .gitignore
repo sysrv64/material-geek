@@ -1,0 +1,8 @@
+target/
+*.apk
+*.aab
+*.so
+jniLibs/
+.DS_Store
+.idea/
+.vscode/

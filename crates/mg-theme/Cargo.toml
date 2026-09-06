@@ -1,0 +1,12 @@
+[package]
+name = "mg-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek theme: light/dark schemes + MotionScheme binding"
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+mg-tokens = { workspace = true }
+mg-motion = { workspace = true }

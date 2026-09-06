@@ -1,0 +1,10 @@
+[package]
+name = "mg-tokens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek design tokens: color roles, type scale, shape, elevation, motion (M3E 1.5.0-alpha25 / CMP 1.12.0 baseline)"
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
