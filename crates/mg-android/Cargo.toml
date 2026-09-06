@@ -38,6 +38,7 @@ label = "MaterialGeek"
 [[package.metadata.android.application.activity]]
 name = "android.app.NativeActivity"
 config_changes = "orientation|keyboardHidden|screenSize|screenLayout"
+launch_mode = "singleTask"
 exported = true
 
 [[package.metadata.android.application.activity.meta_data]]

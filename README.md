@@ -70,6 +70,8 @@ adb logcat -s material-geek
 
 Init failures (surface, adapter, device) are logged instead of panicking, the adapter request falls back from high-performance to low-power with fallback adapter, and the device is requested with the adapter's own limits rather than desktop defaults.
 
+Android lifecycle notes: the activity is `singleTask`, renderer init never kills the event loop (failures retry on the next resume), and close requests are ignored on Android so the loop survives. winit allows exactly one `EventLoop` per process, so if the system delivers a second `android_main` to a reused process the shell logs it and restarts the process for a clean slate instead of dying silently.
+
 ## Dependencies
 
 Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`, all verified as latest stable releases on crates.io.

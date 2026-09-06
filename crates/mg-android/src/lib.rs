@@ -350,7 +350,6 @@ impl ApplicationHandler for GeekApp {
                 Ok(window) => Arc::new(window),
                 Err(err) => {
                     error!("window creation failed: {err:?}");
-                    event_loop.exit();
                     return;
                 }
             };
@@ -361,7 +360,7 @@ impl ApplicationHandler for GeekApp {
             );
             match RenderState::new(window, &self.theme) {
                 Some(state) => self.state = Some(state),
-                None => event_loop.exit(),
+                None => error!("renderer init failed, will retry on next resume"),
             }
         }
     }
@@ -373,12 +372,17 @@ impl ApplicationHandler for GeekApp {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         _window_id: WindowId,
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                #[cfg(not(target_os = "android"))]
+                _event_loop.exit();
+                #[cfg(target_os = "android")]
+                info!("close requested, keeping loop alive for activity reuse");
+            }
             WindowEvent::Resized(size) => {
                 if let Some(state) = self.state.as_mut() {
                     state.resize(size.width, size.height);
@@ -422,12 +426,16 @@ fn android_main(app: AndroidApp) {
         Ok(event_loop) => event_loop,
         Err(err) => {
             error!("event loop creation failed: {err:?}");
+            if matches!(err, winit::error::EventLoopError::RecreationAttempt) {
+                error!("event loop already exists in this process, restarting process");
+                std::process::exit(0);
+            }
             return;
         }
     };
     let mut handler = GeekApp::new();
-    if let Err(err) = event_loop.run_app(&mut handler) {
-        error!("event loop exited with error: {err:?}");
+    match event_loop.run_app(&mut handler) {
+        Ok(()) => info!("event loop returned, ending android thread"),
+        Err(err) => error!("event loop exited with error: {err:?}"),
     }
-    info!("material-geek android exit");
 }
