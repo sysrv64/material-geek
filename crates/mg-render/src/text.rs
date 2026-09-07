@@ -60,10 +60,11 @@ impl Default for TextEngine {
 
 impl TextEngine {
     pub fn new() -> Self {
-        let mut font_system = FontSystem::new();
-        font_system.db_mut().load_font_data(REGULAR.to_vec());
-        font_system.db_mut().load_font_data(MEDIUM.to_vec());
-        font_system.db_mut().load_font_data(SYMBOLS_TTF.to_vec());
+        let mut db = fontdb::Database::new();
+        db.load_font_data(REGULAR.to_vec());
+        db.load_font_data(MEDIUM.to_vec());
+        db.load_font_data(SYMBOLS_TTF.to_vec());
+        let font_system = FontSystem::new_with_locale_and_db(String::from("en-US"), db);
         Self {
             font_system,
             swash: SwashCache::new(),
@@ -103,7 +104,7 @@ impl TextEngine {
                 } else {
                     Weight::NORMAL
                 })
-                .letter_spacing(tracking_em * px)
+                .letter_spacing(tracking_em)
                 .metadata(meta);
             let mut buf = Buffer::new(&mut self.font_system, Metrics::new(px, lh));
             buf.set_text(s, &attrs, Shaping::Advanced, None);
@@ -315,5 +316,19 @@ mod tests {
             let _ = e.text_width(&format!("s{i}"), 12.0, false, 0.0);
         }
         assert!(e.buffers.len() < TEXT_CACHE_CAP);
+    }
+
+    #[test]
+    fn only_embedded_fonts_are_visible() {
+        let e = engine();
+        let mut names: Vec<String> = e
+            .font_system
+            .db()
+            .faces()
+            .flat_map(|f| f.families.iter().map(|(n, _)| n.clone()))
+            .collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names, ["Material Symbols Outlined", "Roboto"]);
     }
 }

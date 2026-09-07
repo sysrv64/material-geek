@@ -24,6 +24,7 @@ rust-version = "1.86"
 serde = { version = "1.0.229", features = ["derive"] }
 glyphon = "0.12"
 cosmic-text = "0.19"
+fontdb = "0.23"
 bytemuck = { version = "1.25", features = ["derive"] }
 wgpu = "30"
 mg-tokens = { path = "crates/mg-tokens" }

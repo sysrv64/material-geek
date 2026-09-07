@@ -226,6 +226,25 @@ impl UiRenderer {
         self.rect(cx - r, cy - r, r * 2.0, r * 2.0, color, [r; 4]);
     }
 
+    pub fn stroke_line(&mut self, p1: [f32; 2], p2: [f32; 2], width: f32, color: [f32; 4]) {
+        let dx = p2[0] - p1[0];
+        let dy = p2[1] - p1[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if length < 0.1 {
+            return;
+        }
+        let angle = dy.atan2(dx);
+        let center = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
+        let radius = width * 0.5;
+        let mut inst = ShapeInstance::empty();
+        inst.rect = [center[0] - length * 0.5, center[1] - radius, length, width];
+        inst.fill_col = color;
+        inst.radii = [radius; 4]; // rounded capsule ends
+        inst.stroke_clip[3] = angle; // rotation handled inside the SDF
+        inst._pad = [self.next_depth(), 0.0];
+        self.shape.instances.push(inst);
+    }
+
     pub fn clip_last(&mut self, clip: [f32; 4]) {
         self.shape.clip_last(clip);
     }

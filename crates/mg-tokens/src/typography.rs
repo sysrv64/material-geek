@@ -29,12 +29,14 @@ pub struct TypeStyle {
 }
 
 impl TypeStyle {
-    pub const fn of(size_sp: f32, line_height_sp: f32, weight: u16, tracking_em: f32) -> Self {
+    /// M3 type scale roles are specified with tracking in `sp`;
+    /// `tracking_em` stores `tracking_sp / size_sp` as consumed by cosmic-text.
+    pub const fn of(size_sp: f32, line_height_sp: f32, weight: u16, tracking_sp: f32) -> Self {
         Self {
             size_sp,
             line_height_sp,
             weight,
-            tracking_em,
+            tracking_em: tracking_sp / size_sp,
             emphasized: false,
         }
     }
@@ -80,6 +82,16 @@ pub fn style(role: TypeRole, emphasized: bool) -> TypeStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tracking_is_stored_in_em() {
+        let body_l = style(TypeRole::BodyL, false);
+        assert!((body_l.tracking_em - 0.5 / 16.0).abs() < 1e-9);
+        let label_s = style(TypeRole::LabelS, false);
+        assert!((label_s.tracking_em - 0.5 / 11.0).abs() < 1e-9);
+        let display_l = style(TypeRole::DisplayL, false);
+        assert!((display_l.tracking_em - (-0.25 / 57.0)).abs() < 1e-9);
+    }
+
     #[test]
     fn all_roles_have_positive_size() {
         let roles = [

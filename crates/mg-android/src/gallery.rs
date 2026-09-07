@@ -298,8 +298,8 @@ impl Gallery {
         (width / 480.0).max(1.0)
     }
 
-    pub fn step(&mut self) {
-        let dt = 1.0 / 60.0;
+    pub fn step(&mut self, dt: f32) {
+        let dt = dt.clamp(0.0, 1.0 / 15.0);
         self.morph.step(dt);
         self.group_press.step(dt);
         self.slider_thumb.step(dt);
@@ -924,7 +924,8 @@ impl Gallery {
             self.pal.text
         };
         let ex = expand * 8.0 * u;
-        let radius = expand * 20.0 * u;
+        let press = expand.clamp(0.0, 1.0);
+        let radius = (1.0 - press) * 20.0 * u + press * 6.0 * u;
         let rect = Rect {
             x: x - ex * 0.5,
             y,
@@ -1489,14 +1490,14 @@ impl Gallery {
                     if !self.is_pressed(Action::Group(i)) {
                         self.group_segment(ui, i, gx, y, label);
                     }
-                    gx += iw;
+                    gx += iw + 2.0 * u;
                 }
                 let mut gx = x;
                 for (i, label) in labels.into_iter().enumerate() {
                     if self.is_pressed(Action::Group(i)) {
                         self.group_segment(ui, i, gx, y, label);
                     }
-                    gx += iw;
+                    gx += iw + 2.0 * u;
                 }
             }
             ComponentId::Card => {
@@ -2390,24 +2391,29 @@ impl Gallery {
                         ts(M3_LABEL_LARGE, self.pal.text, u),
                     );
                 }
-                ui.rect(
-                    cx - 2.0 * u,
-                    cy - 56.0 * u,
+                // Native clock hands: one rotated-capsule SDF draw per hand.
+                let hour_angle = 306.0f32.to_radians();
+                let hour_len = 38.0 * u;
+                ui.stroke_line(
+                    [cx, cy],
+                    [
+                        cx + hour_len * hour_angle.cos(),
+                        cy + hour_len * hour_angle.sin(),
+                    ],
                     4.0 * u,
-                    56.0 * u,
                     self.pal.primary,
-                    r4(2.0 * u),
                 );
-                let hand = 306.0f32.to_radians();
-                for k in 1..=9 {
-                    let rr = k as f32 * 4.0 * u;
-                    ui.circle(
-                        cx + rr * hand.cos(),
-                        cy + rr * hand.sin(),
-                        2.2 * u,
-                        self.pal.primary,
-                    );
-                }
+                let minute_angle = (-90.0f32).to_radians();
+                let minute_len = 56.0 * u;
+                ui.stroke_line(
+                    [cx, cy],
+                    [
+                        cx + minute_len * minute_angle.cos(),
+                        cy + minute_len * minute_angle.sin(),
+                    ],
+                    3.0 * u,
+                    self.pal.primary,
+                );
                 ui.circle(cx, cy, 5.0 * u, self.pal.primary);
                 ui.text(
                     "10:24",
@@ -2772,6 +2778,7 @@ impl Gallery {
 pub struct GalleryApp {
     gallery: Gallery,
     ui: Option<UiInner>,
+    last_frame: Option<Instant>,
 }
 
 struct UiInner {
@@ -2788,6 +2795,7 @@ impl GalleryApp {
         Self {
             gallery: Gallery::new(),
             ui: None,
+            last_frame: None,
         }
     }
 
@@ -2859,6 +2867,7 @@ impl GalleryApp {
         let mut renderer = UiRenderer::new(&device, &queue, config.format);
         renderer.set_screen(&device, &queue, config.width as f32, config.height as f32);
         info!("gallery renderer ready {}x{}", config.width, config.height);
+        self.last_frame = None;
         self.ui = Some(UiInner {
             window,
             surface,
@@ -2872,6 +2881,7 @@ impl GalleryApp {
 
     pub fn suspend(&mut self) {
         self.ui = None;
+        self.last_frame = None;
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -2893,7 +2903,12 @@ impl GalleryApp {
         let Some(ui) = self.ui.as_mut() else {
             return;
         };
-        self.gallery.step();
+        let now = Instant::now();
+        let dt = self
+            .last_frame
+            .map_or(1.0 / 60.0, |prev| (now - prev).as_secs_f32());
+        self.last_frame = Some(now);
+        self.gallery.step(dt);
         let size = ui.window.inner_size();
         if size.width != ui.config.width || size.height != ui.config.height {
             ui.config.width = size.width.max(1);

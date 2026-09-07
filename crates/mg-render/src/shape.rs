@@ -119,7 +119,8 @@ impl ShapePipeline {
                 compilation_options: Default::default(),
                 targets: &[Some(ColorTargetState {
                     format,
-                    blend: Some(BlendState::ALPHA_BLENDING),
+                    // Fragment output is premultiplied linear color.
+                    blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
