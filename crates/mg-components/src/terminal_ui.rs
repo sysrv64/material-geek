@@ -63,6 +63,9 @@ pub struct GhosttyStudioState {
     pub post_effect_flags: u32,
     pub font_size_dp: f32,
     pub slider_props: SliderProps,
+    pub theme_scroll_x: f32,
+    pub shader_scroll_x: f32,
+    pub style_scroll_x: f32,
 }
 
 impl Default for GhosttyStudioState {
@@ -75,6 +78,9 @@ impl Default for GhosttyStudioState {
             post_effect_flags: 0,
             font_size_dp: 14.0,
             slider_props: SliderProps::with_range(14.0, 10.0, 26.0),
+            theme_scroll_x: 0.0,
+            shader_scroll_x: 0.0,
+            style_scroll_x: 0.0,
         }
     }
 }
@@ -100,6 +106,7 @@ impl<'a> UiContext<'a> {
         tabs: &[TerminalTabItem],
         grid_cols: usize,
         grid_rows: usize,
+        tab_scroll_x: &mut f32,
     ) -> Option<TerminalTopBarAction> {
         let u = self.u();
         let pal = self.state.pal.clone();
@@ -180,18 +187,12 @@ impl<'a> UiContext<'a> {
 
         // Left side: Session Tabs & New Tab (+) button
         let max_tab_area = (w - 164.0 * u).max(60.0 * u);
-        let mut curr_x = x + 8.0 * u;
 
-        for (i, tab) in tabs.iter().enumerate() {
-            if curr_x + 60.0 * u > x + max_tab_area {
-                break;
-            }
-            let text_color = if tab.is_selected {
-                pal.on_secondary_container
-            } else {
-                pal.sub
-            };
-            let style = ts(M3_LABEL_LARGE, text_color, u);
+        // Precompute tab widths and total length
+        let mut tab_widths = Vec::with_capacity(tabs.len());
+        let mut total_tabs_w = 44.0 * u;
+        for tab in tabs {
+            let style = ts(M3_LABEL_LARGE, pal.text, u);
             let tw = self
                 .renderer
                 .text_width(&tab.title, style.px, style.medium, style.tracking_em);
@@ -199,60 +200,91 @@ impl<'a> UiContext<'a> {
             let tab_w = (tw + 24.0 * u + if has_close { 20.0 * u } else { 0.0 })
                 .min(140.0 * u)
                 .max(64.0 * u);
+            tab_widths.push(tab_w);
+            total_tabs_w += tab_w + 6.0 * u;
+        }
 
+        let min_scroll = (max_tab_area - total_tabs_w).min(0.0);
+        let tab_row_rect = Rect::new(x, y, max_tab_area, h);
+        let tab_row_id = WidgetId::from_label("tb_tabs_row");
+        let row_resp = self.register_zone(
+            tab_row_id,
+            tab_row_rect,
+            pal.primary,
+            ZoneKind::SwipeHorizontalDrag,
+            true,
+        );
+        if row_resp.dragged {
+            *tab_scroll_x = (*tab_scroll_x + self.frame_delta.0).clamp(min_scroll, 0.0);
+        }
+
+        let mut curr_x = x + 8.0 * u + *tab_scroll_x;
+
+        for (i, tab) in tabs.iter().enumerate() {
+            let tab_w = tab_widths[i];
             let tab_rect = Rect::new(curr_x, y + (h - 34.0 * u) * 0.5, tab_w, 34.0 * u);
             let tid = WidgetId::from_label("tb_tab").with_index(i);
 
-            if tab.is_selected {
-                self.renderer.rect(
-                    tab_rect.x,
-                    tab_rect.y,
-                    tab_rect.w,
-                    tab_rect.h,
-                    pal.secondary_container,
-                    r4(17.0 * u),
-                );
-            }
-            self.draw_state_layer(tid, tab_rect, r4(17.0 * u), pal.text);
-            self.draw_ripples(tid, tab_rect);
+            if tab_rect.x + tab_rect.w > x && tab_rect.x < x + max_tab_area {
+                let text_color = if tab.is_selected {
+                    pal.on_secondary_container
+                } else {
+                    pal.sub
+                };
+                let style = ts(M3_LABEL_LARGE, text_color, u);
 
-            let text_x = tab_rect.x + 12.0 * u;
-            self.renderer.text(&tab.title, text_x, tab_rect.y + 8.0 * u, style);
-
-            if has_close {
-                let close_x = tab_rect.x + tab_rect.w - 16.0 * u;
-                let close_y = tab_rect.cy();
-                icon_c(self.renderer, "close", close_x, close_y, 14.0 * u, text_color);
-                let close_rect = Rect::new(close_x - 10.0 * u, tab_rect.y, 22.0 * u, tab_rect.h);
-                let cid = WidgetId::from_label("tb_close").with_index(i);
-                if self
-                    .register_zone(cid, close_rect, pal.text, ZoneKind::Tap { bounded: true }, false)
-                    .clicked
-                {
-                    action = Some(TerminalTopBarAction::CloseTab(i));
+                if tab.is_selected {
+                    self.renderer.rect(
+                        tab_rect.x,
+                        tab_rect.y,
+                        tab_rect.w,
+                        tab_rect.h,
+                        pal.secondary_container,
+                        r4(17.0 * u),
+                    );
                 }
-            }
+                self.draw_state_layer(tid, tab_rect, r4(17.0 * u), pal.text);
+                self.draw_ripples(tid, tab_rect);
 
-            if self
-                .register_zone(tid, tab_rect, pal.text, ZoneKind::Tap { bounded: true }, false)
-                .clicked
-                && action.is_none()
-            {
-                action = Some(TerminalTopBarAction::SelectTab(i));
+                let text_x = tab_rect.x + 12.0 * u;
+                self.renderer.text(&tab.title, text_x, tab_rect.y + 8.0 * u, style);
+
+                let has_close = tabs.len() > 1;
+                if has_close {
+                    let close_x = tab_rect.x + tab_rect.w - 16.0 * u;
+                    let close_y = tab_rect.cy();
+                    icon_c(self.renderer, "close", close_x, close_y, 14.0 * u, text_color);
+                    let close_rect = Rect::new(close_x - 10.0 * u, tab_rect.y, 22.0 * u, tab_rect.h);
+                    let cid = WidgetId::from_label("tb_close").with_index(i);
+                    if self
+                        .register_zone(cid, close_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+                        .clicked
+                    {
+                        action = Some(TerminalTopBarAction::CloseTab(i));
+                    }
+                }
+
+                if self
+                    .register_zone(tid, tab_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+                    .clicked
+                    && action.is_none()
+                {
+                    action = Some(TerminalTopBarAction::SelectTab(i));
+                }
             }
 
             curr_x += tab_w + 6.0 * u;
         }
 
         // New tab (+) button
-        if curr_x + 36.0 * u <= x + max_tab_area {
-            let add_rect = Rect::new(curr_x, y + (h - 32.0 * u) * 0.5, 32.0 * u, 32.0 * u);
+        let add_rect = Rect::new(curr_x, y + (h - 32.0 * u) * 0.5, 32.0 * u, 32.0 * u);
+        if add_rect.x + add_rect.w > x && add_rect.x < x + max_tab_area {
             let aid = WidgetId::from_label("tb_add");
             self.draw_state_layer(aid, add_rect, r4(16.0 * u), pal.primary);
             self.draw_ripples(aid, add_rect);
             icon_c(self.renderer, "add", add_rect.cx(), add_rect.cy(), 18.0 * u, pal.primary);
             if self
-                .register_zone(aid, add_rect, pal.primary, ZoneKind::Tap { bounded: true }, false)
+                .register_zone(aid, add_rect, pal.primary, ZoneKind::Tap { bounded: true }, true)
                 .clicked
             {
                 action = Some(TerminalTopBarAction::NewTab);
@@ -369,26 +401,28 @@ impl<'a> UiContext<'a> {
         let pal = self.state.pal.clone();
         let mut state_changed = false;
 
-        // Scrim over full screen
-        let scrim_rect = Rect::new(0.0, 0.0, screen_w, screen_h);
+        let sheet_h = (screen_h * 0.72).min(560.0 * u);
+        let sheet_y = screen_h - sheet_h;
+
+        // Scrim ONLY covers area above the sheet
+        let scrim_rect = Rect::new(0.0, 0.0, screen_w, sheet_y);
         self.renderer
-            .rect(0.0, 0.0, screen_w, screen_h, with_alpha(pal.scrim, 0.54), r4(0.0));
+            .rect(0.0, 0.0, screen_w, sheet_y, with_alpha(pal.scrim, 0.54), r4(0.0));
         let scrim_id = WidgetId::from_label("studio_scrim");
         if self
-            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, false)
+            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
             .clicked
         {
             state.is_open = false;
             return true;
         }
 
-        // Sheet container
-        let sheet_h = (screen_h * 0.72).min(560.0 * u);
-        let sheet_y = screen_h - sheet_h;
+        // Sheet container and its child widgets are overlays
+        self.in_overlay = true;
+
         let sheet_rect = Rect::new(0.0, sheet_y, screen_w, sheet_h);
-        // Intercept touches on sheet itself
         let sheet_id = WidgetId::from_label("studio_sheet");
-        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, false);
+        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, true);
 
         self.renderer.rect(
             sheet_rect.x,
@@ -432,16 +466,18 @@ impl<'a> UiContext<'a> {
         self.draw_ripples(cid, close_rect);
         icon_c(self.renderer, "close", close_rect.cx(), close_rect.cy(), 20.0 * u, pal.sub);
         if self
-            .register_zone(cid, close_rect, pal.sub, ZoneKind::Tap { bounded: true }, false)
+            .register_zone(cid, close_rect, pal.sub, ZoneKind::Tap { bounded: true }, true)
             .clicked
         {
             state.is_open = false;
+            self.in_overlay = false;
             return true;
         }
 
         let mut cy = sheet_y + 80.0 * u;
+        let row_w = screen_w - 40.0 * u;
 
-        // Section 1: Themes
+        // Section 1: Themes (horizontally scrollable chip row)
         self.renderer.text(
             "Terminal Theme",
             20.0 * u,
@@ -450,21 +486,57 @@ impl<'a> UiContext<'a> {
         );
         cy += 24.0 * u;
 
-        let themes = ["Ghostty", "One Half", "Solarized", "Monokai", "Nord"];
-        let mut tx = 20.0 * u;
+        let themes = [
+            "Ghostty",
+            "Catppuccin",
+            "TokyoNight",
+            "Gruvbox",
+            "Dracula",
+            "RosePine",
+            "Nord",
+            "Cyberpunk",
+        ];
+        let mut theme_widths = Vec::with_capacity(themes.len());
+        let mut total_themes_w = 0.0f32;
+        for name in &themes {
+            let tw = self.renderer.text_width(name, 14.0 * u, true, 0.01);
+            let cw = (tw + 32.0 * u).max(64.0 * u);
+            theme_widths.push(cw);
+            total_themes_w += cw + 8.0 * u;
+        }
+        let min_theme_scroll = (row_w - total_themes_w).min(0.0);
+        let theme_row_rect = Rect::new(20.0 * u, cy, row_w, 36.0 * u);
+        let theme_row_id = WidgetId::from_label("st_theme_row");
+        let trow_resp = self.register_zone(
+            theme_row_id,
+            theme_row_rect,
+            pal.primary,
+            ZoneKind::SwipeHorizontalDrag,
+            true,
+        );
+        if trow_resp.dragged {
+            state.theme_scroll_x = (state.theme_scroll_x + self.frame_delta.0).clamp(min_theme_scroll, 0.0);
+        }
+
+        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        let mut tx = 20.0 * u + state.theme_scroll_x;
         for (i, name) in themes.into_iter().enumerate() {
-            let mut chip_props = ChipProps::new(name, state.theme_index == i);
-            let tid = WidgetId::from_label("st_theme").with_index(i);
-            let (cw, resp, _) = self.chip(tid, tx, cy, &mut chip_props, false);
-            if resp.clicked {
-                state.theme_index = i;
-                state_changed = true;
+            let cw = theme_widths[i];
+            if tx + cw > 20.0 * u && tx < screen_w - 20.0 * u {
+                let mut chip_props = ChipProps::new(name, state.theme_index == i);
+                let tid = WidgetId::from_label("st_theme").with_index(i);
+                let (_, resp, _) = self.chip(tid, tx, cy, &mut chip_props, false);
+                if resp.clicked {
+                    state.theme_index = i;
+                    state_changed = true;
+                }
             }
             tx += cw + 8.0 * u;
         }
+        self.renderer.pop_clip();
         cy += 44.0 * u;
 
-        // Section 2: Cursor Shader
+        // Section 2: Cursor Shader (horizontally scrollable chip row)
         self.renderer.text(
             "Cursor Animation Shader",
             20.0 * u,
@@ -474,20 +546,47 @@ impl<'a> UiContext<'a> {
         cy += 24.0 * u;
 
         let shaders = ["Off", "Smear", "Blaze", "Ripple", "Pulse"];
-        let mut sx = 20.0 * u;
+        let mut shader_widths = Vec::with_capacity(shaders.len());
+        let mut total_shaders_w = 0.0f32;
+        for name in &shaders {
+            let tw = self.renderer.text_width(name, 14.0 * u, true, 0.01);
+            let cw = (tw + 32.0 * u).max(60.0 * u);
+            shader_widths.push(cw);
+            total_shaders_w += cw + 8.0 * u;
+        }
+        let min_shader_scroll = (row_w - total_shaders_w).min(0.0);
+        let shader_row_rect = Rect::new(20.0 * u, cy, row_w, 36.0 * u);
+        let shader_row_id = WidgetId::from_label("st_shader_row");
+        let srow_resp = self.register_zone(
+            shader_row_id,
+            shader_row_rect,
+            pal.primary,
+            ZoneKind::SwipeHorizontalDrag,
+            true,
+        );
+        if srow_resp.dragged {
+            state.shader_scroll_x = (state.shader_scroll_x + self.frame_delta.0).clamp(min_shader_scroll, 0.0);
+        }
+
+        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        let mut sx = 20.0 * u + state.shader_scroll_x;
         for (i, name) in shaders.into_iter().enumerate() {
-            let mut chip_props = ChipProps::new(name, state.cursor_shader_mode == i);
-            let sid = WidgetId::from_label("st_shader").with_index(i);
-            let (cw, resp, _) = self.chip(sid, sx, cy, &mut chip_props, false);
-            if resp.clicked {
-                state.cursor_shader_mode = i;
-                state_changed = true;
+            let cw = shader_widths[i];
+            if sx + cw > 20.0 * u && sx < screen_w - 20.0 * u {
+                let mut chip_props = ChipProps::new(name, state.cursor_shader_mode == i);
+                let sid = WidgetId::from_label("st_shader").with_index(i);
+                let (_, resp, _) = self.chip(sid, sx, cy, &mut chip_props, false);
+                if resp.clicked {
+                    state.cursor_shader_mode = i;
+                    state_changed = true;
+                }
             }
             sx += cw + 8.0 * u;
         }
+        self.renderer.pop_clip();
         cy += 44.0 * u;
 
-        // Section 3: Cursor Style
+        // Section 3: Cursor Style (horizontally scrollable chip row)
         self.renderer.text(
             "Cursor Style",
             20.0 * u,
@@ -497,17 +596,44 @@ impl<'a> UiContext<'a> {
         cy += 24.0 * u;
 
         let styles = ["Block", "Bar", "Underline"];
-        let mut stx = 20.0 * u;
+        let mut style_widths = Vec::with_capacity(styles.len());
+        let mut total_styles_w = 0.0f32;
+        for name in &styles {
+            let tw = self.renderer.text_width(name, 14.0 * u, true, 0.01);
+            let cw = (tw + 32.0 * u).max(64.0 * u);
+            style_widths.push(cw);
+            total_styles_w += cw + 8.0 * u;
+        }
+        let min_style_scroll = (row_w - total_styles_w).min(0.0);
+        let style_row_rect = Rect::new(20.0 * u, cy, row_w, 36.0 * u);
+        let style_row_id = WidgetId::from_label("st_style_row");
+        let styrow_resp = self.register_zone(
+            style_row_id,
+            style_row_rect,
+            pal.primary,
+            ZoneKind::SwipeHorizontalDrag,
+            true,
+        );
+        if styrow_resp.dragged {
+            state.style_scroll_x = (state.style_scroll_x + self.frame_delta.0).clamp(min_style_scroll, 0.0);
+        }
+
+        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        let mut stx = 20.0 * u + state.style_scroll_x;
         for (i, name) in styles.into_iter().enumerate() {
-            let mut chip_props = ChipProps::new(name, state.cursor_style == i);
-            let stid = WidgetId::from_label("st_style").with_index(i);
-            let (cw, resp, _) = self.chip(stid, stx, cy, &mut chip_props, false);
-            if resp.clicked {
-                state.cursor_style = i;
-                state_changed = true;
+            let cw = style_widths[i];
+            if stx + cw > 20.0 * u && stx < screen_w - 20.0 * u {
+                let mut chip_props = ChipProps::new(name, state.cursor_style == i);
+                let stid = WidgetId::from_label("st_style").with_index(i);
+                let (_, resp, _) = self.chip(stid, stx, cy, &mut chip_props, false);
+                if resp.clicked {
+                    state.cursor_style = i;
+                    state_changed = true;
+                }
             }
             stx += cw + 8.0 * u;
         }
+        self.renderer.pop_clip();
         cy += 44.0 * u;
 
         // Section 4: Post Effects
@@ -559,6 +685,7 @@ impl<'a> UiContext<'a> {
             state_changed = true;
         }
 
+        self.in_overlay = false;
         state_changed
     }
 
@@ -577,25 +704,28 @@ impl<'a> UiContext<'a> {
         let pal = self.state.pal.clone();
         let mut action = None;
 
-        // Scrim
-        let scrim_rect = Rect::new(0.0, 0.0, screen_w, screen_h);
+        let sheet_h = 320.0 * u;
+        let sheet_y = screen_h - sheet_h;
+
+        // Scrim ONLY covers area above the sheet
+        let scrim_rect = Rect::new(0.0, 0.0, screen_w, sheet_y);
         self.renderer
-            .rect(0.0, 0.0, screen_w, screen_h, with_alpha(pal.scrim, 0.54), r4(0.0));
+            .rect(0.0, 0.0, screen_w, sheet_y, with_alpha(pal.scrim, 0.54), r4(0.0));
         let scrim_id = WidgetId::from_label("qa_scrim");
         if self
-            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, false)
+            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
             .clicked
         {
             *is_open = false;
             return None;
         }
 
+        self.in_overlay = true;
+
         // Sheet container
-        let sheet_h = 320.0 * u;
-        let sheet_y = screen_h - sheet_h;
         let sheet_rect = Rect::new(0.0, sheet_y, screen_w, sheet_h);
         let sheet_id = WidgetId::from_label("qa_sheet");
-        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, false);
+        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, true);
 
         self.renderer.rect(
             sheet_rect.x,
@@ -661,6 +791,7 @@ impl<'a> UiContext<'a> {
             cy += item_h + 4.0 * u;
         }
 
+        self.in_overlay = false;
         action
     }
 }

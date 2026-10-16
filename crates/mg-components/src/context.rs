@@ -595,7 +595,7 @@ impl UiState {
                         self.active_drag_id = Some(z.id);
                         return;
                     }
-                    if total_dy.abs() > slop * 1.2 && total_dy.abs() > total_dx.abs() {
+                    if !z.overlay && total_dy.abs() > slop * 1.2 && total_dy.abs() > total_dx.abs() {
                         self.dragging_scroll = true;
                         self.active_zone = None;
                         self.release_active_ripples();
@@ -616,8 +616,22 @@ impl UiState {
                     }
                 }
                 ZoneKind::Tap { .. } => {
-                    if !z.overlay && total_dx.hypot(total_dy) > slop {
-                        self.dragging_scroll = true;
+                    // Check if this tap started inside a horizontal swipe container (e.g. tabs or chips)
+                    if total_dx.abs() > slop && total_dx.abs() >= total_dy.abs() * 0.85 {
+                        if let Some(swipe_zone) = self.zones.iter().rev().find(|sz| {
+                            sz.kind == ZoneKind::SwipeHorizontalDrag
+                                && sz.rect.contains(self.press_start.0, self.press_start.1)
+                        }) {
+                            self.active_zone = Some(*swipe_zone);
+                            self.active_drag_id = Some(swipe_zone.id);
+                            self.release_active_ripples();
+                            return;
+                        }
+                    }
+                    if total_dx.hypot(total_dy) > slop {
+                        if !z.overlay {
+                            self.dragging_scroll = true;
+                        }
                         self.active_zone = None;
                         self.release_active_ripples();
                     }
@@ -686,6 +700,7 @@ pub struct UiContext<'a> {
     pub renderer: &'a mut UiRenderer,
     pub state: &'a mut UiState,
     pub frame_delta: (f32, f32),
+    pub in_overlay: bool,
 }
 
 impl<'a> UiContext<'a> {
@@ -704,6 +719,7 @@ impl<'a> UiContext<'a> {
             renderer,
             state,
             frame_delta,
+            in_overlay: false,
         }
     }
 
@@ -838,7 +854,7 @@ impl<'a> UiContext<'a> {
             rect,
             ripple_color,
             kind,
-            overlay: overlay || is_app_bar_item,
+            overlay: overlay || self.in_overlay || is_app_bar_item,
         });
 
         let clicked = self.state.just_clicked == Some(id);
