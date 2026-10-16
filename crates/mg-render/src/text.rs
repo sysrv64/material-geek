@@ -2,7 +2,7 @@ use crate::icon_names::icon_codepoint;
 use crate::{TextStyle, MEDIUM, REGULAR, ROBOTO_FAMILY, SYMBOLS_FAMILY, SYMBOLS_TTF};
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
 use glyphon::{Color, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use wgpu::{Device, Queue};
 
@@ -16,12 +16,14 @@ struct TextKey {
     line_h_bits: u32,
     tracking_bits: u32,
     medium: bool,
+    occurrence: u16,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct IconKey {
     name: Arc<str>,
     px_bits: u32,
+    occurrence: u16,
 }
 
 #[derive(Clone)]
@@ -37,6 +39,7 @@ struct TextEntry {
     x: f32,
     y: f32,
     color: [f32; 4],
+    clip: Option<[f32; 4]>,
 }
 
 pub struct TextEngine {
@@ -75,6 +78,44 @@ impl TextEngine {
         }
     }
 
+    fn trim_text_cache_if_needed(&mut self) {
+        if self.buffers.len() < TEXT_CACHE_CAP {
+            return;
+        }
+        if self.entries.is_empty() {
+            self.buffers.clear();
+            return;
+        }
+        let active: HashSet<TextKey> = self
+            .entries
+            .iter()
+            .filter_map(|e| match &e.src {
+                BufSource::Text(k) => Some(k.clone()),
+                BufSource::Icon(_) => None,
+            })
+            .collect();
+        self.buffers.retain(|k, _| active.contains(k));
+    }
+
+    fn trim_icon_cache_if_needed(&mut self) {
+        if self.icon_buffers.len() < ICON_CACHE_CAP {
+            return;
+        }
+        if self.entries.is_empty() {
+            self.icon_buffers.clear();
+            return;
+        }
+        let active: HashSet<IconKey> = self
+            .entries
+            .iter()
+            .filter_map(|e| match &e.src {
+                BufSource::Icon(k) => Some(k.clone()),
+                BufSource::Text(_) => None,
+            })
+            .collect();
+        self.icon_buffers.retain(|k, _| active.contains(k));
+    }
+
     fn text_buffer(
         &mut self,
         s: &str,
@@ -82,6 +123,7 @@ impl TextEngine {
         line_h: f32,
         medium: bool,
         tracking_em: f32,
+        occurrence: u16,
     ) -> (TextKey, usize) {
         let key = TextKey {
             content: Arc::from(s),
@@ -89,11 +131,10 @@ impl TextEngine {
             line_h_bits: line_h.to_bits(),
             tracking_bits: tracking_em.to_bits(),
             medium,
+            occurrence,
         };
         if !self.buffers.contains_key(&key) {
-            if self.buffers.len() >= TEXT_CACHE_CAP {
-                self.buffers.clear();
-            }
+            self.trim_text_cache_if_needed();
             let meta = self.next_meta;
             self.next_meta += 1;
             let lh = if line_h > 0.0 { line_h } else { px * 1.3 };
@@ -107,6 +148,7 @@ impl TextEngine {
                 .letter_spacing(tracking_em)
                 .metadata(meta);
             let mut buf = Buffer::new(&mut self.font_system, Metrics::new(px, lh));
+            buf.set_size(Some(16384.0), Some(16384.0));
             buf.set_text(s, &attrs, Shaping::Advanced, None);
             buf.shape_until_scroll(&mut self.font_system, true);
             self.buffers.insert(key.clone(), buf);
@@ -124,8 +166,43 @@ impl TextEngine {
     }
 
     pub fn text(&mut self, s: &str, x: f32, y_top: f32, style: TextStyle, layer: u32) -> f32 {
-        let (key, meta) =
-            self.text_buffer(s, style.px, style.line_h, style.medium, style.tracking_em);
+        self.text_clipped(s, x, y_top, style, layer, None)
+    }
+
+    pub fn text_clipped(
+        &mut self,
+        s: &str,
+        x: f32,
+        y_top: f32,
+        style: TextStyle,
+        layer: u32,
+        clip: Option<[f32; 4]>,
+    ) -> f32 {
+        let px_bits = style.px.to_bits();
+        let line_h_bits = style.line_h.to_bits();
+        let tracking_bits = style.tracking_em.to_bits();
+        let occurrence = self
+            .entries
+            .iter()
+            .filter(|e| match &e.src {
+                BufSource::Text(k) => {
+                    k.content.as_ref() == s
+                        && k.px_bits == px_bits
+                        && k.line_h_bits == line_h_bits
+                        && k.tracking_bits == tracking_bits
+                        && k.medium == style.medium
+                }
+                BufSource::Icon(_) => false,
+            })
+            .count() as u16;
+        let (key, meta) = self.text_buffer(
+            s,
+            style.px,
+            style.line_h,
+            style.medium,
+            style.tracking_em,
+            occurrence,
+        );
         let width = {
             let buf = self
                 .buffers
@@ -140,12 +217,13 @@ impl TextEngine {
             x,
             y: y_top,
             color: style.color,
+            clip,
         });
         width
     }
 
     pub fn text_width(&mut self, s: &str, px: f32, medium: bool, tracking_em: f32) -> f32 {
-        let (key, _) = self.text_buffer(s, px, px, medium, tracking_em);
+        let (key, _) = self.text_buffer(s, px, px, medium, tracking_em, 0);
         let buf = self
             .buffers
             .get(&key)
@@ -154,24 +232,47 @@ impl TextEngine {
     }
 
     pub fn icon(&mut self, name: &str, x: f32, y: f32, px: f32, color: [f32; 4], layer: u32) {
+        self.icon_clipped(name, x, y, px, color, layer, None);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn icon_clipped(
+        &mut self,
+        name: &str,
+        x: f32,
+        y: f32,
+        px: f32,
+        color: [f32; 4],
+        layer: u32,
+        clip: Option<[f32; 4]>,
+    ) {
         let Some(ch) = icon_codepoint(name) else {
             log::warn!("unknown icon name: {name}");
             return;
         };
+        let px_bits = px.to_bits();
+        let occurrence = self
+            .entries
+            .iter()
+            .filter(|e| match &e.src {
+                BufSource::Icon(k) => k.name.as_ref() == name && k.px_bits == px_bits,
+                BufSource::Text(_) => false,
+            })
+            .count() as u16;
         let key = IconKey {
             name: Arc::from(name),
-            px_bits: px.to_bits(),
+            px_bits,
+            occurrence,
         };
         if !self.icon_buffers.contains_key(&key) {
-            if self.icon_buffers.len() >= ICON_CACHE_CAP {
-                self.icon_buffers.clear();
-            }
+            self.trim_icon_cache_if_needed();
             let meta = self.next_meta;
             self.next_meta += 1;
             let attrs = Attrs::new()
                 .family(Family::Name(SYMBOLS_FAMILY))
                 .metadata(meta);
             let mut buf = Buffer::new(&mut self.font_system, Metrics::new(px, px));
+            buf.set_size(Some(16384.0), Some(16384.0));
             buf.set_text(&ch.to_string(), &attrs, Shaping::Advanced, None);
             buf.shape_until_scroll(&mut self.font_system, true);
             self.icon_buffers.insert(key.clone(), buf);
@@ -185,13 +286,16 @@ impl TextEngine {
             .next()
             .and_then(|r| r.glyphs.first())
             .map_or(0, |g| g.metadata);
+        // MaterialSymbols-Regular has hhea ascent 1.10*px and descent -0.10*px;
+        // shifting top by -0.055*px centers the glyph optically inside [y, y + px].
         self.entries.push(TextEntry {
             src: BufSource::Icon(key),
             meta,
             layer,
             x,
-            y,
+            y: y - px * 0.055,
             color,
+            clip,
         });
     }
 
@@ -223,12 +327,22 @@ impl TextEngine {
                     BufSource::Icon(k) => &icon_buffers[k],
                 };
                 let [r, g, b, a] = e.color;
+                let bounds = if let Some([cx, cy, cw, ch]) = e.clip {
+                    TextBounds {
+                        left: cx.floor() as i32,
+                        top: cy.floor() as i32,
+                        right: (cx + cw).ceil() as i32,
+                        bottom: (cy + ch).ceil() as i32,
+                    }
+                } else {
+                    TextBounds::default()
+                };
                 TextArea {
                     buffer,
                     left: e.x,
                     top: e.y,
                     scale: 1.0,
-                    bounds: TextBounds::default(),
+                    bounds,
                     default_color: Color::rgba(to_u8(r), to_u8(g), to_u8(b), to_u8(a)),
                     custom_glyphs: &[],
                 }
@@ -277,6 +391,22 @@ mod tests {
     }
 
     #[test]
+    fn multi_word_text_does_not_wrap_to_zero_width() {
+        let mut e = engine();
+        let single = e.text_width("Supporting", 14.0, false, 0.0);
+        let multi = e.text_width(
+            "Supporting copy sits here and wraps the idea.",
+            14.0,
+            false,
+            0.0,
+        );
+        assert!(
+            multi > single * 3.0,
+            "multi={multi} should be > 3x single={single}"
+        );
+    }
+
+    #[test]
     fn tracking_changes_width() {
         let mut e = engine();
         let plain = e.text_width("gg", 16.0, false, 0.0);
@@ -307,6 +437,22 @@ mod tests {
         assert_eq!(e.entries.len(), 2);
         e.clear_entries();
         assert!(e.entries.is_empty());
+    }
+
+    #[test]
+    fn duplicate_strings_get_distinct_metadata_in_same_frame() {
+        let mut e = engine();
+        let style = TextStyle {
+            px: 14.0,
+            medium: false,
+            color: [1.0, 1.0, 1.0, 1.0],
+            tracking_em: 0.0,
+            line_h: 20.0,
+        };
+        e.text("Delete", 0.0, 0.0, style, 10);
+        e.text("Delete", 0.0, 40.0, style, 20);
+        assert_eq!(e.entries.len(), 2);
+        assert_ne!(e.entries[0].meta, e.entries[1].meta);
     }
 
     #[test]

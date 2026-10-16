@@ -972,6 +972,7 @@ dependencies = [
  "fontdb",
  "glyphon",
  "log",
+ "mg-tokens",
  "naga",
  "wgpu",
 ]

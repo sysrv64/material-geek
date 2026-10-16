@@ -1,82 +1,48 @@
 # material-geek
 
-A Material 3 Expressive idea for developers and geeks: a universal (Android, Linux desktop) design system in Rust.
+A Material 3 Expressive design system and GPU renderer in Rust for Android and Linux desktop.
 
-An alternative to material3-multiplatform, built from scratch in Rust as a headless core (tokens + state) with thin render adapters.
+Built from scratch in Rust as a headless core (`mg-tokens`, `mg-motion`, `mg-theme`, `mg-components`) paired with a real-time `wgpu` + `glyphon` GPU renderer (`mg-render`) and interactive 41-component catalog (`mg-android`).
 
-Verified baseline: Jetpack `material3:1.5.0-alpha25` (stable `1.4.0`) + JetBrains CMP `1.12.0` (`material3:1.12.0-alpha03` = Jetpack `1.5.0-alpha22`).
+Verified baseline: Jetpack Compose `material3:1.5.0-alpha` (`Compose-Material-3-Expressive-Catalog`) and Flutter `material_3_expressive` (`material_shapes.dart`, `loading_indicator.dart`, `wavy_progress_indicator.dart`).
 
-## Status: v0.1.0, core only, not a pixel port
+## Status: Complete Material 3 Expressive GPU Port
 
 | Layer | Status |
 |---|---|
-| `mg-tokens`: 45 color roles, 30 type styles, 10 shapes, 6 elevations, easings/durations/springs | DONE |
-| `mg-motion`: Dynamic Motion with analytic springs + cubic-bezier + expressive/standard MotionScheme + retarget | DONE, covered by physics tests |
+| `mg-tokens`: 45 color roles, 30 type styles, 10 corner token tiers + **35 Material 3 Expressive `RoundedPolygon` shapes & cubic Bézier `Morph`**, 6 elevations, easings/durations/springs | DONE |
+| `mg-motion`: Dynamic Motion with analytic springs + cubic-bezier + expressive/standard `MotionScheme` + zero-jump `retarget` | DONE, covered by physics tests |
 | `mg-theme`: light/dark x expressive/standard | DONE |
-| `mg-components`: 41 of 41 components as headless Props/State | DONE, API surface |
-| `mg-android`: winit plus wgpu shell rendering the dark expressive theme with a spring-driven indicator, packaged by `cargo-apk2` | DONE, debug and signed release APKs built by CI |
-| Render adapter with real pixels (desktop + Android surface) | TODO in v0.2 |
-| Dynamic-color HCT, shape morph, text layout | TODO in v0.2 |
+| `mg-components`: 41 of 41 M3 Expressive components with spec constants and Props/State | DONE |
+| `mg-render`: Real-time `wgpu` WGSL SDF renderer (`RoundedBox`, 64-segment `M3ShapeMorph` across all 35 shapes, `WavyLinear` sinusoidal wave, `WavyCircularArc`) with derivative (`fwidth`) anti-aliasing, premultiplied alpha blending, pixel-accurate clipping, and `glyphon`/`cosmic-text` Roboto + Material Symbols rendering | DONE |
+| `mg-android`: Interactive 41-component Material 3 Expressive gallery (`LoadingIndicator` 7-shape morph, `LinearWavyProgressIndicator`, `CircularWavyProgressIndicator`, `HorizontalMultiBrowseCarousel` / `CenteredHeroCarousel`, connected `ButtonGroup` spring physics, `SplitButton`, `FabMenu`, `WavySlider`, etc.) | DONE |
 
-Scope note: "all elements ported" in v0.1 means state specs for all 41 components plus exact tokens plus motion physics. Pixel rendering of each component is v0.2 work.
+## Key Architecture Highlights
 
-## Geek UX
-
-- Everything is inspectable: the theme serializes with `serde`, a spring can be stopped at any frame to read `(x, v)`.
-- Springs instead of tweens for interruptible gestures: target changes mid-flight with no jumps (`DynamicSpring::retarget`).
-- `MotionScheme::expressive()` vs `standard()` switches in one line; spatial tracks (damping below 1.0, overshoot) are separated from effects tracks (damping exactly 1.0, strictly no overshoot).
-- `ComponentId::ALL` is a registry of 41 components, guarded against drift by a test.
+- **35 Official Material 3 Expressive Shapes (`MaterialShape`)**: Exact port of `RoundedPolygon`, `CornerRounding`, `Cubic`, and `Morph` from `material_shapes.dart` / `androidx.graphics.shapes` (`Circle`, `Square`, `Slanted`, `Arch`, `Fan`, `Arrow`, `SemiCircle`, `Oval`, `Pill`, `Triangle`, `Diamond`, `ClamShell`, `Pentagon`, `Gem`, `Sunny`, `VerySunny`, `Cookie4Sided`, `Cookie6Sided`, `Cookie7Sided`, `Cookie9Sided`, `Cookie12Sided`, `Ghostish`, `Clover4Leaf`, `Clover8Leaf`, `Burst`, `SoftBurst`, `Boom`, `SoftBoom`, `Flower`, `Puffy`, `PuffyDiamond`, `PixelCircle`, `PixelTriangle`, `Bun`, `Heart`), uploaded to a GPU uniform contour bank and evaluated per-pixel in `shape.wgsl`.
+- **Authentic `LoadingIndicator` & `WavyProgressIndicator`**:
+  - `LoadingIndicator` and `ContainedLoadingIndicator` morph smoothly on the GPU across the 7 official M3E shapes (`SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval`) with continuous + step rotation.
+  - `LinearWavyProgressIndicator` and `CircularWavyProgressIndicator` (determinate & indeterminate) evaluate analytical sinusoidal wave SDFs in `shape.wgsl` with animated phase, amplitude tapering, `4dp` track gaps, and stop indicators.
+- **Crisp Anti-Aliased SDF & Premultiplied Alpha Pipeline**: Derivative-based `fwidth(d)` 1px edge smoothing, inset stroke SDFs, premultiplied linear sRGB output (`col.rgb * col.a`), and pixel-space clip stack (`push_clip` / `pop_clip`).
+- **Fixed `cosmic-text` / `glyphon` Text & Icon Engine**: Unbounded layout width (`16384px`) preventing single-word truncation on spaces, occurrence-indexed glyph metadata preventing depth collisions on repeated strings/icons, and non-occluding glyph depth testing.
 
 ## Quick start
 
 ```bash
 cargo test --workspace
-cargo run -p mg-demo --bin geek_preview
-```
-
-```rust
-use mg_motion::{DynamicSpring, MotionScheme, Tempo, Track};
-use mg_tokens::motion_tokens::schemes;
-
-let scheme = MotionScheme::expressive();
-let spec = scheme.spec(Tempo::Default, Track::Spatial);
-assert_eq!(spec, schemes::EXPRESSIVE_DEFAULT_SPATIAL);
-
-let mut s = DynamicSpring::new(0.0, 1.0, spec);
-s.step(1.0 / 120.0);
-s.retarget(0.0);
+cargo run -p mg-demo
 ```
 
 ## Workspace
 
-- `crates/mg-tokens`: pure data, zero GUI dependencies
-- `crates/mg-motion`: physics with analytic solution, not Euler integration
-- `crates/mg-theme`: scheme plus motion binding
-- `crates/mg-components`: headless Props/State for 41 components
-- `crates/mg-demo`: headless core demo binary
-- `crates/mg-render`: universal wgpu 2D renderer with Roboto text, shared by desktop and Android
-- `crates/mg-android`: Android shell plus Linux desktop entry, excluded from the host workspace, built for the `aarch64-linux-android` target in CI
-
-## Android APK
-
-Package `dev.geek.material`, `NativeActivity`, single `arm64-v8a` target. The shell renders a scrollable gallery of all 41 components in the dark expressive theme with Roboto text: drag to scroll, tap to toggle switches, checkboxes, radios, chips, tabs, navigation, menus and carousel pages, drag the slider, press buttons for spring morph feedback. The same scene runs on Linux desktop through the public `mg_android::run_desktop` entry.
-
-CI builds two artifacts on every `main` push: `material-geek-apk` (debug, auto-generated debug key) and `material-geek-apk-release` (release, signed with the repo keystore and verified with `apksigner verify --print-certs`). Release signing keys live only in GitHub Secrets (`MATERIAL_GEEK_KEYSTORE_BASE64`, `MATERIAL_GEEK_KEYSTORE_PASSWORD`, plus reserved `MATERIAL_GEEK_KEY_ALIAS` and `MATERIAL_GEEK_KEY_PASSWORD`); no key material is committed.
-
-On-device logs use the `material-geek` tag with a panic hook that forwards to logcat:
-
-```bash
-adb logcat -s material-geek
-```
-
-Init failures (surface, adapter, device) are logged instead of panicking, the adapter request falls back from high-performance to low-power with fallback adapter, and the device is requested with the adapter's own limits rather than desktop defaults.
-
-Android lifecycle notes: the activity is `singleTask`, renderer init never kills the event loop (failures retry on the next resume), and close requests are ignored on Android so the loop survives. winit allows exactly one `EventLoop` per process, so if the system delivers a second `android_main` to a reused process the shell logs it and restarts the process for a clean slate instead of dying silently.
-
-## Dependencies
-
-Core workspace: single runtime dependency `serde 1.0.229`. No dependency on egui, iced, or dioxus anywhere. The `mg-android` shell crate alone uses `winit 0.30`, `wgpu 30`, `pollster 1`, `log 0.4`, and `android_logger 0.15`; the `mg-render` crate adds `ab_glyph 0.2` for text, all verified as latest stable releases on crates.io. Bundled Google Sans Code Regular and Medium are SIL OFL 1.1 by the Google Sans Code Project Authors, static instances cut from the official variable font in google/fonts.
+- `crates/mg-tokens`: Color, typography, elevation, motion, and 35 M3 Expressive `RoundedPolygon` + `Morph` shapes
+- `crates/mg-motion`: Analytic spring solver (`DynamicSpring`) and cubic-bezier easing
+- `crates/mg-theme`: Scheme and motion binding
+- `crates/mg-components`: Props/State and M3E geometry constants for all 41 components
+- `crates/mg-demo`: Headless core demo binary
+- `crates/mg-render`: Universal `wgpu` 2D SDF + `glyphon` text/icon renderer
+- `crates/mg-android`: Android (`NativeActivity`) and Linux desktop (`run_desktop`) interactive 41-component M3 Expressive gallery
 
 ## License
 
-Apache-2.0. Material Design specs belong to Google; this crate is an independent Rust port, not a copy of the Compose sources.
+Apache-2.0.

@@ -3,6 +3,7 @@ mod shape;
 mod text;
 
 pub use icon_names::icon_codepoint;
+pub use mg_tokens::shape::MaterialShape;
 pub use shape::ShapeInstance;
 pub use text::TextEngine;
 
@@ -100,6 +101,14 @@ pub(crate) fn layer_depth(n: u32) -> f32 {
     (1.0 - (n as f32 + 1.0) * LAYER_EPS).max(0.0)
 }
 
+fn intersect_clips(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    let x0 = a[0].max(b[0]);
+    let y0 = a[1].max(b[1]);
+    let x1 = (a[0] + a[2]).min(b[0] + b[2]);
+    let y1 = (a[1] + a[3]).min(b[1] + b[3]);
+    [x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0)]
+}
+
 pub struct UiRenderer {
     shape: ShapePipeline,
     engine: Engine,
@@ -109,11 +118,12 @@ pub struct UiRenderer {
     depth_view: TextureView,
     depth_size: (u32, u32),
     layer: u32,
+    clip_stack: Vec<[f32; 4]>,
 }
 
 impl UiRenderer {
     pub fn new(device: &Device, queue: &Queue, format: TextureFormat) -> Self {
-        let shape = ShapePipeline::new(device, format);
+        let shape = ShapePipeline::new(device, queue, format);
         let engine = TextEngine::new();
         let cache = glyphon::Cache::new(device);
         let viewport = glyphon::Viewport::new(device, &cache);
@@ -124,7 +134,7 @@ impl UiRenderer {
             wgpu::MultisampleState::default(),
             Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -153,6 +163,7 @@ impl UiRenderer {
             depth_view: depth_tex.create_view(&wgpu::TextureViewDescriptor::default()),
             depth_size: (0, 0),
             layer: 0,
+            clip_stack: Vec::new(),
         };
         renderer.set_screen(device, queue, 1.0, 1.0);
         renderer
@@ -188,9 +199,49 @@ impl UiRenderer {
         }
     }
 
+    pub fn push_clip(&mut self, clip: [f32; 4]) {
+        let effective = match self.clip_stack.last().copied() {
+            Some(prev) => intersect_clips(prev, clip),
+            None => clip,
+        };
+        self.clip_stack.push(effective);
+    }
+
+    pub fn pop_clip(&mut self) {
+        let _ = self.clip_stack.pop();
+    }
+
+    pub fn current_clip(&self) -> Option<[f32; 4]> {
+        self.clip_stack.last().copied()
+    }
+
     fn next_depth(&mut self) -> f32 {
         self.layer += 1;
         layer_depth(self.layer)
+    }
+
+    fn push_instance(&mut self, mut inst: ShapeInstance) {
+        if let Some(c) = self.current_clip() {
+            if inst.clip_size[0] > 0.0 && inst.clip_size[1] > 0.0 {
+                let merged = intersect_clips(
+                    c,
+                    [
+                        inst.stroke_clip[0],
+                        inst.stroke_clip[1],
+                        inst.clip_size[0],
+                        inst.clip_size[1],
+                    ],
+                );
+                inst.stroke_clip[0] = merged[0];
+                inst.stroke_clip[1] = merged[1];
+                inst.clip_size = [merged[2], merged[3]];
+            } else {
+                inst.stroke_clip[0] = c[0];
+                inst.stroke_clip[1] = c[1];
+                inst.clip_size = [c[2], c[3]];
+            }
+        }
+        self.shape.instances.push(inst);
     }
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4], radii: [f32; 4]) {
@@ -199,7 +250,30 @@ impl UiRenderer {
         inst.fill_col = color;
         inst.radii = radii;
         inst._pad = [self.next_depth(), 0.0];
-        self.shape.instances.push(inst);
+        self.push_instance(inst);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn rect_styled(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        fill_color: [f32; 4],
+        stroke_color: [f32; 4],
+        stroke_width: f32,
+        radii: [f32; 4],
+        rotation: f32,
+    ) {
+        let mut inst = ShapeInstance::empty();
+        inst.rect = [x, y, w, h];
+        inst.fill_col = fill_color;
+        inst.stroke_col = stroke_color;
+        inst.radii = radii;
+        inst.stroke_clip = [0.0, 0.0, stroke_width, rotation];
+        inst._pad = [self.next_depth(), 0.0];
+        self.push_instance(inst);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -219,7 +293,7 @@ impl UiRenderer {
         inst.radii = radii;
         inst.stroke_clip = [0.0, 0.0, stroke_width, 0.0];
         inst._pad = [self.next_depth(), 0.0];
-        self.shape.instances.push(inst);
+        self.push_instance(inst);
     }
 
     pub fn circle(&mut self, cx: f32, cy: f32, r: f32, color: [f32; 4]) {
@@ -236,22 +310,175 @@ impl UiRenderer {
         let angle = dy.atan2(dx);
         let center = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
         let radius = width * 0.5;
+        let full_len = length + width;
         let mut inst = ShapeInstance::empty();
-        inst.rect = [center[0] - length * 0.5, center[1] - radius, length, width];
+        inst.rect = [
+            center[0] - full_len * 0.5,
+            center[1] - radius,
+            full_len,
+            width,
+        ];
         inst.fill_col = color;
-        inst.radii = [radius; 4]; // rounded capsule ends
-        inst.stroke_clip[3] = angle; // rotation handled inside the SDF
+        inst.radii = [radius; 4];
+        inst.stroke_clip[3] = angle;
         inst._pad = [self.next_depth(), 0.0];
-        self.shape.instances.push(inst);
+        self.push_instance(inst);
+    }
+
+    /// Renders a true analytical circular arc or ring (with round caps) on the GPU.
+    #[allow(clippy::too_many_arguments)]
+    pub fn arc_ring(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        outer_radius: f32,
+        stroke_width: f32,
+        start_rad: f32,
+        sweep_rad: f32,
+        color: [f32; 4],
+    ) {
+        self.wavy_arc_ring(
+            cx,
+            cy,
+            outer_radius,
+            stroke_width,
+            start_rad,
+            sweep_rad,
+            0.0,
+            0.0,
+            0.0,
+            color,
+        );
+    }
+
+    /// Renders a true analytical wavy circular progress arc on the GPU (`CircularWavyProgressIndicator`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn wavy_arc_ring(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        outer_radius: f32,
+        stroke_width: f32,
+        start_rad: f32,
+        sweep_rad: f32,
+        wave_amp: f32,
+        wave_cycles: f32,
+        phase: f32,
+        color: [f32; 4],
+    ) {
+        if sweep_rad <= 0.001 || outer_radius <= 0.5 {
+            return;
+        }
+        let mut inst = ShapeInstance::empty();
+        inst.rect = [
+            cx - outer_radius,
+            cy - outer_radius,
+            outer_radius * 2.0,
+            outer_radius * 2.0,
+        ];
+        inst.fill_col = color;
+        inst.radii = [start_rad, sweep_rad, wave_amp, wave_cycles];
+        inst.stroke_clip = [0.0, 0.0, stroke_width, phase];
+        inst._pad = [self.next_depth(), 1.0];
+        self.push_instance(inst);
+    }
+
+    /// Renders a true analytical sinusoidal wave line (`LinearWavyProgressIndicator` / `WavySlider`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn wavy_line(
+        &mut self,
+        x0: f32,
+        x1: f32,
+        cy: f32,
+        stroke_width: f32,
+        wave_amp: f32,
+        wavelength: f32,
+        phase: f32,
+        color: [f32; 4],
+    ) {
+        let w = x1 - x0;
+        if w <= 0.5 {
+            return;
+        }
+        let h = (stroke_width + wave_amp * 2.0).max(stroke_width);
+        let mut inst = ShapeInstance::empty();
+        inst.rect = [x0, cy - h * 0.5, w, h];
+        inst.fill_col = color;
+        inst.radii = [wave_amp, wavelength.max(2.0), phase, stroke_width];
+        inst._pad = [self.next_depth(), 2.0];
+        self.push_instance(inst);
+    }
+
+    /// Renders any of the 35 official Material 3 Expressive shapes via the GPU SDF shader.
+    #[allow(clippy::too_many_arguments)]
+    pub fn m3_shape(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        shape: MaterialShape,
+        rotation_rad: f32,
+        fill_color: [f32; 4],
+        stroke_color: [f32; 4],
+        stroke_width: f32,
+    ) {
+        self.m3_shape_morph(
+            cx,
+            cy,
+            size,
+            shape,
+            shape,
+            0.0,
+            rotation_rad,
+            fill_color,
+            stroke_color,
+            stroke_width,
+        );
+    }
+
+    /// Renders a live GPU SDF morph between two Material 3 Expressive shapes (`LoadingIndicator`, morphed containers).
+    #[allow(clippy::too_many_arguments)]
+    pub fn m3_shape_morph(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        shape_a: MaterialShape,
+        shape_b: MaterialShape,
+        morph_t: f32,
+        rotation_rad: f32,
+        fill_color: [f32; 4],
+        stroke_color: [f32; 4],
+        stroke_width: f32,
+    ) {
+        let half = size * 0.5;
+        let mut inst = ShapeInstance::empty();
+        inst.rect = [cx - half, cy - half, size, size];
+        inst.fill_col = fill_color;
+        inst.stroke_col = stroke_color;
+        inst.radii = [
+            shape_a.index() as f32,
+            shape_b.index() as f32,
+            morph_t.clamp(0.0, 1.0),
+            1.0,
+        ];
+        inst.stroke_clip = [0.0, 0.0, stroke_width, rotation_rad];
+        inst._pad = [self.next_depth(), 3.0];
+        self.push_instance(inst);
     }
 
     pub fn clip_last(&mut self, clip: [f32; 4]) {
-        self.shape.clip_last(clip);
+        let merged = match self.current_clip() {
+            Some(c) => intersect_clips(c, clip),
+            None => clip,
+        };
+        self.shape.clip_last(merged);
     }
 
     pub fn text(&mut self, s: &str, x: f32, y_top: f32, style: TextStyle) -> f32 {
         let layer = self.layer + 1;
-        let width = self.engine.text(s, x, y_top, style, layer);
+        let clip = self.current_clip();
+        let width = self.engine.text_clipped(s, x, y_top, style, layer, clip);
         self.layer = layer;
         width
     }
@@ -262,7 +489,9 @@ impl UiRenderer {
 
     pub fn icon(&mut self, name: &str, x: f32, y: f32, px: f32, color: [f32; 4]) {
         self.layer += 1;
-        self.engine.icon(name, x, y, px, color, self.layer);
+        let clip = self.current_clip();
+        self.engine
+            .icon_clipped(name, x, y, px, color, self.layer, clip);
     }
 
     pub fn flush(&mut self, device: &Device, queue: &Queue, view: &TextureView, clear: [f32; 4]) {
@@ -315,6 +544,7 @@ impl UiRenderer {
         self.engine.clear_entries();
         self.atlas.trim();
         self.layer = 0;
+        self.clip_stack.clear();
     }
 }
 
@@ -329,6 +559,9 @@ mod tests {
         assert!(icon_codepoint("check").is_some());
         assert!(icon_codepoint("favorite").is_some());
         assert!(icon_codepoint("more_vert").is_some());
+        assert!(icon_codepoint("volume_up").is_some());
+        assert!(icon_codepoint("local_cafe").is_some());
+        assert!(icon_codepoint("landscape").is_some());
         assert_eq!(icon_codepoint("definitely_not_an_icon"), None);
         assert_eq!(icon_codepoint(""), None);
     }

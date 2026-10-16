@@ -1,16 +1,23 @@
 struct Screen {
     size: vec2f,
+    _pad: vec2f,
 };
+
+struct ShapeBank {
+    pts: array<vec4f, 1120>,
+};
+
 @group(0) @binding(0) var<uniform> screen: Screen;
+@group(0) @binding(1) var<uniform> shape_bank: ShapeBank;
 
 struct VIn {
     @location(0) rect: vec4f,
     @location(1) fill_col: vec4f,
     @location(2) stroke_col: vec4f,
     @location(3) radii: vec4f,
-    @location(4) stroke_clip: vec4f, // clip_x, clip_y, stroke_w, rotation
-    @location(5) clip_size: vec2f, // clip_w, clip_h
-    @location(6) depth: vec2f,
+    @location(4) stroke_clip: vec4f, // clip_x, clip_y, stroke_w, rotation_or_phase
+    @location(5) clip_size: vec2f,   // clip_w, clip_h
+    @location(6) depth: vec2f,       // depth, kind (0=box, 1=arc/wavy_arc, 2=wavy_line, 3=m3_polygon)
 };
 
 struct VOut {
@@ -20,12 +27,12 @@ struct VOut {
     @location(2) radii: vec4f,
     @location(3) fill_col: vec4f,
     @location(4) stroke_col: vec4f,
-    @location(5) stroke_w: f32,
-    @location(6) rotation: f32,
-    @location(7) clip: vec4f,
+    @location(5) style_params: vec4f, // stroke_w, rotation_or_phase, kind, 0.0
+    @location(6) clip: vec4f,
 };
 
 const AA_PADDING: f32 = 3.0;
+const TAU: f32 = 6.283185307179586;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32, in: VIn) -> VOut {
@@ -41,12 +48,12 @@ fn vs(@builtin(vertex_index) i: u32, in: VIn) -> VOut {
     let half_h = in.rect.w * 0.5;
     let center = in.rect.xy + vec2f(half_w, half_h);
 
-    // Expand the quad outward so the SDF has room for anti-aliased edges
-    // and strokes; without this the rasterizer clips the smooth falloff
-    // and rounded corners come out chopped.
+    let kind = i32(round(in.depth.y));
     let diag = length(vec2f(half_w, half_h));
-    let rot_padding = select(0.0, diag - max(half_w, half_h), in.stroke_clip.w != 0.0);
-    let pad = AA_PADDING + in.stroke_clip.z * 0.5 + rot_padding;
+    let has_rot = (kind != 1) && (in.stroke_clip.w != 0.0);
+    let rot_padding = select(0.0, diag - max(half_w, half_h), has_rot);
+    let wave_extra = select(0.0, in.radii.x + in.radii.w * 0.5, kind == 2);
+    let pad = AA_PADDING + in.stroke_clip.z * 0.5 + rot_padding + wave_extra;
     let padded_half = vec2f(half_w + pad, half_h + pad);
 
     let corner = (vec2f(cx, cy) - vec2f(0.5)) * 2.0;
@@ -61,8 +68,7 @@ fn vs(@builtin(vertex_index) i: u32, in: VIn) -> VOut {
     out.radii = in.radii;
     out.fill_col = in.fill_col;
     out.stroke_col = in.stroke_col;
-    out.stroke_w = in.stroke_clip.z;
-    out.rotation = in.stroke_clip.w;
+    out.style_params = vec4f(in.stroke_clip.z, in.stroke_clip.w, in.depth.y, 0.0);
     out.clip = vec4f(in.stroke_clip.xy, in.clip_size);
     return out;
 }
@@ -71,6 +77,13 @@ fn rotate(p: vec2f, angle: f32) -> vec2f {
     let s = sin(angle);
     let c = cos(angle);
     return vec2f(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+    return length(pa - ba * h);
 }
 
 fn sd_rounded_box(p: vec2f, b: vec2f, rad: vec4f) -> f32 {
@@ -84,48 +97,171 @@ fn sd_rounded_box(p: vec2f, b: vec2f, rad: vec4f) -> f32 {
     return min(max(q.x, q.y), 0.0) + length(max(q, vec2f(0.0))) - rc;
 }
 
+fn sd_wavy_arc(p: vec2f, b: vec2f, params: vec4f, stroke_w: f32, phase: f32) -> f32 {
+    let start_ang = params.x;
+    let sweep = clamp(params.y, 0.0, TAU);
+    let wave_amp = params.z;
+    let wave_cycles = params.w;
+    let half_th = max(stroke_w * 0.5, 0.5);
+    if (sweep <= 0.001) {
+        return 1e5;
+    }
+    let base_r = max(min(b.x, b.y) - half_th - abs(wave_amp), 1.0);
+    let ang = atan2(p.y, p.x);
+    var rel = ang - start_ang;
+    rel = rel - floor(rel / TAU) * TAU;
+
+    let arg = phase + rel * wave_cycles;
+    let r_target = base_r + wave_amp * sin(arg);
+    let dr = wave_amp * wave_cycles * cos(arg) / base_r;
+    let grad_corr = sqrt(1.0 + dr * dr);
+    let d_ring = (abs(length(p) - r_target) / grad_corr) - half_th;
+
+    if (sweep >= TAU - 0.002) {
+        return d_ring;
+    }
+    let r0 = base_r + wave_amp * sin(phase);
+    let p0 = vec2f(cos(start_ang), sin(start_ang)) * r0;
+    let end_ang = start_ang + sweep;
+    let r1 = base_r + wave_amp * sin(phase + sweep * wave_cycles);
+    let p1 = vec2f(cos(end_ang), sin(end_ang)) * r1;
+    let d_caps = min(length(p - p0), length(p - p1)) - half_th;
+    if (rel <= sweep) {
+        return min(d_ring, d_caps);
+    }
+    return d_caps;
+}
+
+fn sd_wavy_line(p: vec2f, b: vec2f, params: vec4f) -> f32 {
+    let amp = params.x;
+    let wavelength = max(params.y, 2.0);
+    let phase = params.z;
+    let half_th = max(params.w * 0.5, 0.5);
+    let half_span = max(b.x - half_th, 0.0);
+    let k = TAU / wavelength;
+    let xc = clamp(p.x, -half_span, half_span);
+    let step = min(wavelength * 0.08, 2.0);
+
+    var min_d = 1e5;
+    var prev_x = clamp(xc - 2.0 * step, -half_span, half_span);
+    var prev_pt = vec2f(prev_x, amp * sin(phase + (prev_x + half_span) * k));
+    for (var s = -1; s <= 2; s = s + 1) {
+        let cur_x = clamp(xc + f32(s) * step, -half_span, half_span);
+        let cur_pt = vec2f(cur_x, amp * sin(phase + (cur_x + half_span) * k));
+        min_d = min(min_d, sd_segment(p, prev_pt, cur_pt));
+        prev_pt = cur_pt;
+    }
+    return min_d - half_th;
+}
+
+fn get_shape_vertex(shape_id: u32, vert_idx: u32) -> vec2f {
+    let pair = shape_bank.pts[shape_id * 32u + (vert_idx >> 1u)];
+    return select(pair.xy, pair.zw, (vert_idx & 1u) == 1u);
+}
+
+fn sample_morphed_vertex(shape_a: u32, shape_b: u32, t: f32, vert_idx: u32) -> vec2f {
+    let va = get_shape_vertex(shape_a, vert_idx);
+    if (shape_a == shape_b || t <= 0.0001) {
+        return va;
+    }
+    let vb = get_shape_vertex(shape_b, vert_idx);
+    return mix(va, vb, t);
+}
+
+fn sd_m3_polygon(p: vec2f, b: vec2f, params: vec4f) -> f32 {
+    let shape_a = min(u32(max(params.x, 0.0)), 34u);
+    let shape_b = min(u32(max(params.y, 0.0)), 34u);
+    let morph_t = clamp(params.z, 0.0, 1.0);
+    let scale_factor = max(params.w, 0.05);
+    let scale = min(b.x, b.y) * 2.0 * scale_factor;
+    let q = p / max(scale, 1.0);
+
+    if (dot(q, q) > 0.72) {
+        return (length(q) - 0.5) * scale;
+    }
+
+    var prev = sample_morphed_vertex(shape_a, shape_b, morph_t, 63u);
+    let v0 = sample_morphed_vertex(shape_a, shape_b, morph_t, 0u);
+    var d2 = dot(q - v0, q - v0);
+    var s = 1.0;
+
+    for (var i = 0u; i < 64u; i = i + 1u) {
+        let curr = sample_morphed_vertex(shape_a, shape_b, morph_t, i);
+        let e = prev - curr;
+        let w = q - curr;
+        let h = clamp(dot(w, e) / max(dot(e, e), 1e-8), 0.0, 1.0);
+        let diff = w - e * h;
+        d2 = min(d2, dot(diff, diff));
+
+        let c1 = q.y >= curr.y;
+        let c2 = q.y < prev.y;
+        let c3 = (e.x * w.y) > (e.y * w.x);
+        if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) {
+            s = -s;
+        }
+        prev = curr;
+    }
+    return s * sqrt(d2) * scale;
+}
+
 fn srgb_to_linear(c: f32) -> f32 {
     return select(c / 12.92, pow((c + 0.055) / 1.055, 2.4), c > 0.04045);
 }
 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4f {
-    // Rotation happens inside the SDF so capsules and bars render natively
-    // at any angle without vertex-level rotation.
-    let p = rotate(in.local_pos, -in.rotation);
-    let d = sd_rounded_box(p, in.half_size, in.radii);
-    let aa = max(fwidth(d), 0.7);
+    let stroke_w = in.style_params.x;
+    let rot_or_phase = in.style_params.y;
+    let kind = i32(round(in.style_params.z));
+
+    let p = select(rotate(in.local_pos, -rot_or_phase), in.local_pos, kind == 1);
+    var d = 0.0;
+    if (kind == 1) {
+        d = sd_wavy_arc(p, in.half_size, in.radii, stroke_w, rot_or_phase);
+    } else if (kind == 2) {
+        d = sd_wavy_line(p, in.half_size, in.radii);
+    } else if (kind == 3) {
+        d = sd_m3_polygon(p, in.half_size, in.radii);
+    } else {
+        d = sd_rounded_box(p, in.half_size, in.radii);
+    }
+
+    let fw = clamp(fwidth(d), 0.65, 2.0);
+    let aa = fw * 0.55;
     let fill_a = 1.0 - smoothstep(-aa, aa, d);
     var stroke_a = 0.0;
-    if (in.stroke_w > 0.0) {
-        stroke_a = 1.0 - smoothstep(-aa, aa, abs(d) - in.stroke_w * 0.5);
+    if (kind != 1 && kind != 2 && stroke_w > 0.0) {
+        let d_center = select(0.0, -stroke_w * 0.5, in.fill_col.a <= 0.001);
+        stroke_a = 1.0 - smoothstep(-aa, aa, abs(d - d_center) - stroke_w * 0.5);
     }
+
+    let fill_alpha = in.fill_col.a * fill_a;
     let fill_lin = vec4f(
-        srgb_to_linear(in.fill_col.r),
-        srgb_to_linear(in.fill_col.g),
-        srgb_to_linear(in.fill_col.b),
-        in.fill_col.a * fill_a,
+        srgb_to_linear(in.fill_col.r) * fill_alpha,
+        srgb_to_linear(in.fill_col.g) * fill_alpha,
+        srgb_to_linear(in.fill_col.b) * fill_alpha,
+        fill_alpha,
     );
+    let stroke_alpha = in.stroke_col.a * stroke_a;
     let stroke_lin = vec4f(
-        srgb_to_linear(in.stroke_col.r),
-        srgb_to_linear(in.stroke_col.g),
-        srgb_to_linear(in.stroke_col.b),
-        in.stroke_col.a * stroke_a,
+        srgb_to_linear(in.stroke_col.r) * stroke_alpha,
+        srgb_to_linear(in.stroke_col.g) * stroke_alpha,
+        srgb_to_linear(in.stroke_col.b) * stroke_alpha,
+        stroke_alpha,
     );
     var out = stroke_lin + fill_lin * (1.0 - stroke_lin.a);
-    if (out.a <= 0.001) {
-        discard;
-    }
-    if (in.clip.z > 0.0) {
-        let px = vec2f(
-            (in.pos.x + 1.0) * 0.5 * screen.size.x,
-            (1.0 - in.pos.y) * 0.5 * screen.size.y,
-        );
+
+    if (in.clip.z > 0.0 && in.clip.w > 0.0) {
+        let px = in.pos.xy;
         let mx = smoothstep(in.clip.x - 0.5, in.clip.x + 0.5, px.x)
             * (1.0 - smoothstep(in.clip.x + in.clip.z - 0.5, in.clip.x + in.clip.z + 0.5, px.x));
         let my = smoothstep(in.clip.y - 0.5, in.clip.y + 0.5, px.y)
             * (1.0 - smoothstep(in.clip.y + in.clip.w - 0.5, in.clip.y + in.clip.w + 0.5, px.y));
         out = out * (mx * my);
+    }
+
+    if (out.a <= 0.001) {
+        discard;
     }
     return out;
 }

@@ -12,6 +12,7 @@ glyphon = { workspace = true }
 cosmic-text = { workspace = true }
 fontdb = { workspace = true }
 bytemuck = { workspace = true }
+mg-tokens = { workspace = true }
 log = "0.4"
 
 [dev-dependencies]

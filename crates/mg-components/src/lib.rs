@@ -1,5 +1,5 @@
-use mg_tokens::elevation::ElevationLevel;
-use mg_tokens::shape::ShapeStyle;
+pub use mg_tokens::elevation::ElevationLevel;
+pub use mg_tokens::shape::{MaterialShape, ShapeStyle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -102,6 +102,28 @@ pub enum Size {
     Xl,
 }
 
+impl Size {
+    /// Official Material 3 Expressive button height in dp for each size tier.
+    pub const fn button_height_dp(self) -> f32 {
+        match self {
+            Self::Xs => 32.0,
+            Self::S => 40.0,
+            Self::M => 56.0,
+            Self::L => 96.0,
+            Self::Xl => 136.0,
+        }
+    }
+
+    /// Official Material 3 Expressive pressed corner radius in dp for each size tier.
+    pub const fn pressed_radius_dp(self) -> f32 {
+        match self {
+            Self::Xs | Self::S => 8.0,
+            Self::M => 12.0,
+            Self::L | Self::Xl => 16.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Variant {
     Elevated,
@@ -125,6 +147,31 @@ pub enum FabSize {
     Small,
     Medium,
     Large,
+}
+
+impl FabSize {
+    pub const fn container_dp(self) -> f32 {
+        match self {
+            Self::Small => 40.0,
+            Self::Medium => 56.0,
+            Self::Large => 80.0,
+        }
+    }
+
+    pub const fn corner_radius_dp(self) -> f32 {
+        match self {
+            Self::Small => 12.0,
+            Self::Medium => 16.0,
+            Self::Large => 24.0,
+        }
+    }
+
+    pub const fn icon_dp(self) -> f32 {
+        match self {
+            Self::Small | Self::Medium => 24.0,
+            Self::Large => 36.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -209,9 +256,31 @@ pub struct ProgressProps {
     pub wavy: bool,
 }
 
+impl ProgressProps {
+    pub const STROKE_WIDTH_DP: f32 = 4.0;
+    pub const TRACK_GAP_DP: f32 = 4.0;
+    pub const STOP_SIZE_DP: f32 = 4.0;
+    pub const LINEAR_WAVELENGTH_DP: f32 = 40.0;
+    pub const LINEAR_INDETERMINATE_WAVELENGTH_DP: f32 = 20.0;
+    pub const CIRCULAR_SIZE_DP: f32 = 48.0;
+    pub const WAVE_AMPLITUDE_DP: f32 = 3.0;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LoadingProps {
     pub contained: bool,
+}
+
+impl LoadingProps {
+    pub const DEFAULT_CONTAINER_DP: f32 = 48.0;
+    pub const ACTIVE_INDICATOR_DP: f32 = 38.0;
+    pub const MORPH_INTERVAL_SECS: f32 = 0.65;
+    pub const FULL_ROTATION_SECS: f32 = 4.666;
+    pub const STEP_ROTATION_RAD: f32 = std::f32::consts::FRAC_PI_4;
+
+    pub const fn default_polygons() -> &'static [MaterialShape; 7] {
+        &MaterialShape::LOADING_SEQUENCE
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -337,6 +406,13 @@ pub struct CarouselState {
     pub kind: CarouselKind,
     pub index: usize,
     pub count: usize,
+}
+
+impl CarouselState {
+    pub const CORNER_RADIUS_DP: f32 = 28.0;
+    pub const ITEM_SPACING_DP: f32 = 8.0;
+    pub const MIN_SMALL_ITEM_DP: f32 = 40.0;
+    pub const MAX_SMALL_ITEM_DP: f32 = 56.0;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,5 +558,13 @@ mod tests {
             menu_items: 4,
         };
         assert!((2..=6).contains(&p.menu_items));
+    }
+
+    #[test]
+    fn loading_sequence_matches_m3e_spec() {
+        let seq = LoadingProps::default_polygons();
+        assert_eq!(seq.len(), 7);
+        assert_eq!(seq[0], MaterialShape::SoftBurst);
+        assert_eq!(seq[6], MaterialShape::Oval);
     }
 }
