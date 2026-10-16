@@ -1,6 +1,28 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::collapsible_else_if
+)]
+
+#[rustfmt::skip]
+pub mod context;
+#[rustfmt::skip]
+pub mod props;
+#[rustfmt::skip]
+pub mod showcase;
+#[rustfmt::skip]
+pub mod widgets;
+
+pub use context::{
+    argb_hex, argb_to_f32, eval_indet_segment, icon_c, lerp, loading_morph_state, mix, r4, srgb,
+    text_c, ts, with_alpha, ColumnLayout, KeyInput, Palette, Rect, RowLayout, SoftKeyboardMode,
+    UiContext, UiState, WidgetId, WidgetResponse, ZoneKind,
+};
 pub use mg_tokens::elevation::ElevationLevel;
 pub use mg_tokens::shape::{MaterialShape, ShapeStyle};
+pub use props::*;
 use serde::{Deserialize, Serialize};
+pub use showcase::{CatalogState, APP_BAR_HEIGHT_DP, STATUS_BAR_INSET_DP};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ComponentId {
@@ -93,412 +115,6 @@ impl ComponentId {
     ];
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Size {
-    Xs,
-    S,
-    M,
-    L,
-    Xl,
-}
-
-impl Size {
-    /// Official Material 3 Expressive button height in dp for each size tier.
-    pub const fn button_height_dp(self) -> f32 {
-        match self {
-            Self::Xs => 32.0,
-            Self::S => 40.0,
-            Self::M => 56.0,
-            Self::L => 96.0,
-            Self::Xl => 136.0,
-        }
-    }
-
-    /// Official Material 3 Expressive pressed corner radius in dp for each size tier.
-    pub const fn pressed_radius_dp(self) -> f32 {
-        match self {
-            Self::Xs | Self::S => 8.0,
-            Self::M => 12.0,
-            Self::L | Self::Xl => 16.0,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Variant {
-    Elevated,
-    Filled,
-    Tonal,
-    Outlined,
-    Text,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ButtonProps {
-    pub variant: Variant,
-    pub size: Size,
-    pub enabled: bool,
-    pub label: String,
-    pub morph_on_press: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FabSize {
-    Small,
-    Medium,
-    Large,
-}
-
-impl FabSize {
-    pub const fn container_dp(self) -> f32 {
-        match self {
-            Self::Small => 40.0,
-            Self::Medium => 56.0,
-            Self::Large => 80.0,
-        }
-    }
-
-    pub const fn corner_radius_dp(self) -> f32 {
-        match self {
-            Self::Small => 12.0,
-            Self::Medium => 16.0,
-            Self::Large => 24.0,
-        }
-    }
-
-    pub const fn icon_dp(self) -> f32 {
-        match self {
-            Self::Small | Self::Medium => 24.0,
-            Self::Large => 36.0,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FabProps {
-    pub size: FabSize,
-    pub expanded: bool,
-    pub menu_open: bool,
-    pub menu_items: u8,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SplitButtonProps {
-    pub main_label: String,
-    pub menu_open: bool,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ButtonGroupProps {
-    pub connected: bool,
-    pub multi_select: bool,
-    pub selected: Vec<usize>,
-    pub count: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IconButtonVariant {
-    Standard,
-    Filled,
-    Tonal,
-    Outlined,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct IconButtonProps {
-    pub variant: IconButtonVariant,
-    pub toggleable: bool,
-    pub checked: bool,
-    pub enabled: bool,
-    pub wide: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CheckState {
-    Off,
-    On,
-    Indeterminate,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CheckboxProps {
-    pub state: CheckState,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SwitchProps {
-    pub on: bool,
-    pub enabled: bool,
-    pub with_icon: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RadioProps {
-    pub selected: bool,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SliderProps {
-    pub value: f32,
-    pub range: (f32, f32),
-    pub steps: u32,
-    pub enabled: bool,
-    pub vertical: bool,
-    pub range_end: Option<f32>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProgressProps {
-    pub progress: Option<f32>,
-    pub wavy: bool,
-}
-
-impl ProgressProps {
-    pub const STROKE_WIDTH_DP: f32 = 4.0;
-    pub const TRACK_GAP_DP: f32 = 4.0;
-    pub const STOP_SIZE_DP: f32 = 4.0;
-    pub const LINEAR_WAVELENGTH_DP: f32 = 40.0;
-    pub const LINEAR_INDETERMINATE_WAVELENGTH_DP: f32 = 20.0;
-    pub const CIRCULAR_SIZE_DP: f32 = 48.0;
-    pub const WAVE_AMPLITUDE_DP: f32 = 3.0;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LoadingProps {
-    pub contained: bool,
-}
-
-impl LoadingProps {
-    pub const DEFAULT_CONTAINER_DP: f32 = 48.0;
-    pub const ACTIVE_INDICATOR_DP: f32 = 38.0;
-    pub const MORPH_INTERVAL_SECS: f32 = 0.65;
-    pub const FULL_ROTATION_SECS: f32 = 4.666;
-    pub const STEP_ROTATION_RAD: f32 = std::f32::consts::FRAC_PI_4;
-
-    pub const fn default_polygons() -> &'static [MaterialShape; 7] {
-        &MaterialShape::LOADING_SEQUENCE
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ChipProps {
-    pub label: String,
-    pub selected: bool,
-    pub enabled: bool,
-    pub with_icon: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CardVariant {
-    Elevated,
-    Filled,
-    Outlined,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CardProps {
-    pub variant: CardVariant,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DialogKind {
-    Alert,
-    Basic,
-    FullScreen,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DialogState {
-    pub open: bool,
-    pub kind: DialogKind,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SheetKind {
-    ModalBottom,
-    Side,
-    Scaffold,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SheetState {
-    pub open: bool,
-    pub kind: SheetKind,
-    pub fraction: f32,
-    pub skip_partial: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct NavProps {
-    pub items: Vec<String>,
-    pub selected: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DrawerKind {
-    Modal,
-    Dismissible,
-    Permanent,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DrawerState {
-    pub open: bool,
-    pub kind: DrawerKind,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AppBarKind {
-    Small,
-    CenterAligned,
-    Medium,
-    Large,
-    Flexible,
-    ExitUntilCollapsed,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ScaffoldProps {
-    pub app_bar: AppBarKind,
-    pub fab_present: bool,
-    pub snackbar_present: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SearchProps {
-    pub query: String,
-    pub expanded: bool,
-    pub docked: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TextFieldProps {
-    pub text: String,
-    pub label: String,
-    pub outlined: bool,
-    pub secure: bool,
-    pub error: Option<String>,
-    pub enabled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MenuProps {
-    pub open: bool,
-    pub items: Vec<String>,
-    pub groups: Vec<(String, usize)>,
-    pub selected: Vec<usize>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CarouselKind {
-    MultiBrowse,
-    Uncontained,
-    Hero,
-    CenteredHero,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CarouselState {
-    pub kind: CarouselKind,
-    pub index: usize,
-    pub count: usize,
-}
-
-impl CarouselState {
-    pub const CORNER_RADIUS_DP: f32 = 28.0;
-    pub const ITEM_SPACING_DP: f32 = 8.0;
-    pub const MIN_SMALL_ITEM_DP: f32 = 40.0;
-    pub const MAX_SMALL_ITEM_DP: f32 = 56.0;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DateState {
-    pub millis: Option<u64>,
-    pub range_end_millis: Option<u64>,
-    pub dialog_open: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TimeState {
-    pub hour: u8,
-    pub minute: u8,
-    pub input_mode: bool,
-    pub dialog_open: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TooltipProps {
-    pub text: String,
-    pub rich: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SnackbarData {
-    pub message: String,
-    pub action: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BadgeProps {
-    pub count: Option<u32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ListItemProps {
-    pub headline: String,
-    pub supporting: Option<String>,
-    pub trailing: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TabsProps {
-    pub tabs: Vec<String>,
-    pub selected: usize,
-    pub secondary: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SegmentedProps {
-    pub options: Vec<String>,
-    pub selected: Vec<usize>,
-    pub multi: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DividerProps {
-    pub vertical: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PullRefreshState {
-    pub refreshing: bool,
-    pub pull_fraction: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DismissState {
-    pub dismissed: bool,
-    pub direction_start_to_end: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolbarKind {
-    Docked,
-    FloatingHorizontal,
-    FloatingVertical,
-    FlexibleBottom,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolbarProps {
-    pub kind: ToolbarKind,
-    pub with_fab: bool,
-}
-
 pub fn resting_elevation(id: ComponentId) -> ElevationLevel {
     use ComponentId as C;
     match id {
@@ -566,5 +182,83 @@ mod tests {
         assert_eq!(seq.len(), 7);
         assert_eq!(seq[0], MaterialShape::SoftBurst);
         assert_eq!(seq[6], MaterialShape::Oval);
+    }
+
+    #[test]
+    fn date_picker_entry_mode_and_numeric_parsing_work() {
+        let mut dp = DatePickerState::new(2026, 10, 16);
+        assert_eq!(dp.entry_mode, DatePickerEntryMode::Calendar);
+        assert_eq!(dp.format_headline(), "Fri, Oct 16");
+
+        // Toggle via pencil button -> Input mode
+        dp.toggle_entry_mode();
+        assert_eq!(dp.entry_mode, DatePickerEntryMode::Input);
+        assert_eq!(dp.input_field.text, "10/16/2026");
+
+        // Enter a new date in digits
+        dp.input_field.text = "12/25/2026".to_string();
+        assert!(dp.sync_date_from_input());
+        assert_eq!((dp.year, dp.month, dp.day), (2026, 12, 25));
+        assert_eq!(dp.format_headline(), "Fri, Dec 25");
+
+        // Also supports YYYY-MM-DD and 8-digit MMDDYYYY
+        assert_eq!(
+            DatePickerState::parse_date_str("2028-02-29"),
+            Ok((2028, 2, 29))
+        );
+        assert!(DatePickerState::parse_date_str("2026-02-29").is_err());
+        assert_eq!(
+            DatePickerState::parse_date_str("04152027"),
+            Ok((2027, 4, 15))
+        );
+    }
+
+    #[test]
+    fn text_field_editing_and_password_masking_work() {
+        let mut tf = TextFieldProps::filled("Email", "hello");
+        assert_eq!(tf.cursor, 5);
+        tf.insert_char('!');
+        assert_eq!(tf.text, "hello!");
+        tf.backspace();
+        assert_eq!(tf.text, "hello");
+        tf.move_home();
+        tf.insert_str("say ");
+        assert_eq!(tf.text, "say hello");
+
+        let mut pw = TextFieldProps::password("Password", "secret", true);
+        assert_eq!(pw.display_text(), "••••••");
+        pw.password_visible = true;
+        assert_eq!(pw.display_text(), "secret");
+    }
+
+    #[test]
+    fn time_picker_input_and_dial_work() {
+        let mut tp = TimePickerState::new(10, 25, true);
+        assert!(!tp.input_mode);
+        tp.toggle_input_mode();
+        assert!(tp.input_mode);
+        tp.hour_field.text = "04".to_string();
+        tp.minute_field.text = "45".to_string();
+        tp.is_am = false;
+        assert!(tp.confirm());
+        assert_eq!(tp.format_time(), "04:45 PM");
+    }
+
+    #[test]
+    fn swipe_to_dismiss_and_ui_state_theme_toggle_work() {
+        let mut item =
+            SwipeDismissItem::new(1, "Card", "Swipe me", "Now", "mail", MaterialShape::Arch);
+        item.offset_dp = -120.0;
+        item.dismissed = true;
+        item.reset();
+        assert!(!item.dismissed);
+        assert_eq!(item.offset_dp, 0.0);
+
+        let mut state = UiState::default();
+        assert!(state.pal.is_dark);
+        state.toggle_dark_mode();
+        assert!(!state.pal.is_dark);
+        state.toggle_motion_scheme();
+        assert!(!state.theme.expressive_motion);
     }
 }

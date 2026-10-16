@@ -1,13 +1,17 @@
-mod gallery;
+pub mod gallery;
 
-use gallery::GalleryApp;
+pub use gallery::{Gallery, GalleryApp};
 use log::{error, info};
+use mg_components::KeyInput;
 #[cfg(target_os = "android")]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
+use winit::event::{
+    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 #[cfg(target_os = "android")]
@@ -63,6 +67,7 @@ impl ApplicationHandler for Handler {
                 return;
             }
         };
+        window.set_ime_allowed(true);
         let size = window.inner_size();
         info!("resumed with window {}x{}", size.width, size.height);
         if !self.app.resume(window) {
@@ -92,6 +97,32 @@ impl ApplicationHandler for Handler {
             WindowEvent::RedrawRequested => {
                 self.app.frame();
             }
+            WindowEvent::Ime(Ime::Commit(text)) => {
+                self.app.key_input(KeyInput::Text(text));
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => match logical_key {
+                Key::Named(NamedKey::Backspace) => self.app.key_input(KeyInput::Backspace),
+                Key::Named(NamedKey::Delete) => self.app.key_input(KeyInput::Delete),
+                Key::Named(NamedKey::ArrowLeft) => self.app.key_input(KeyInput::Left),
+                Key::Named(NamedKey::ArrowRight) => self.app.key_input(KeyInput::Right),
+                Key::Named(NamedKey::Home) => self.app.key_input(KeyInput::Home),
+                Key::Named(NamedKey::End) => self.app.key_input(KeyInput::End),
+                Key::Named(NamedKey::Enter) => self.app.key_input(KeyInput::Enter),
+                Key::Named(NamedKey::Escape) => self.app.key_input(KeyInput::Escape),
+                Key::Named(NamedKey::Space) => self.app.key_input(KeyInput::Char(' ')),
+                Key::Character(s) => {
+                    self.app.key_input(KeyInput::Text(s.to_string()));
+                }
+                _ => {}
+            },
             WindowEvent::Touch(Touch {
                 phase, location, ..
             }) => {

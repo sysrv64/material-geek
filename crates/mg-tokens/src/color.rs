@@ -127,6 +127,16 @@ impl ColorScheme {
         }
     }
 
+    /// Material 3 baseline (default reference palette) light scheme.
+    pub fn baseline_light() -> Self {
+        Self::light()
+    }
+
+    /// Material 3 baseline (default reference palette) dark scheme.
+    pub fn baseline_dark() -> Self {
+        Self::dark()
+    }
+
     pub fn dark() -> Self {
         Self {
             is_dark: true,

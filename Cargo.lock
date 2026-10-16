@@ -941,6 +941,9 @@ dependencies = [
 name = "mg-components"
 version = "0.1.0"
 dependencies = [
+ "mg-motion",
+ "mg-render",
+ "mg-theme",
  "mg-tokens",
  "serde",
 ]

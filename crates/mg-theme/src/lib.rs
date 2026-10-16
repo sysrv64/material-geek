@@ -42,6 +42,15 @@ impl GeekTheme {
     pub fn scheme_kind(&self) -> SchemeKind {
         self.motion.kind
     }
+
+    /// Effective motion scheme, following the `expressive_motion` toggle.
+    pub fn motion_scheme(&self) -> MotionScheme {
+        if self.expressive_motion {
+            MotionScheme::expressive()
+        } else {
+            MotionScheme::standard()
+        }
+    }
 }
 
 #[cfg(test)]

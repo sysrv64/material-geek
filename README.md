@@ -1,30 +1,70 @@
 # material-geek
 
-A Material 3 Expressive design system and GPU renderer in Rust for Android and Linux desktop.
+A full Material 3 Expressive GPU UI Framework and design system in Rust for Android (`NativeActivity`) and Linux/desktop (`winit` + `wgpu`).
 
-Built from scratch in Rust as a headless core (`mg-tokens`, `mg-motion`, `mg-theme`, `mg-components`) paired with a real-time `wgpu` + `glyphon` GPU renderer (`mg-render`) and interactive 41-component catalog (`mg-android`).
+Built from scratch in Rust with a modular architecture:
+- **`mg-tokens`**: 45 M3 color roles, 30 typography tokens, 10 corner tiers, and **35 Material 3 Expressive `RoundedPolygon` shapes & cubic Bézier `Morph`**.
+- **`mg-motion`**: Analytic second-order spring solver (`DynamicSpring`), cubic-bezier easing, and `Expressive` / `Standard` `MotionScheme` with zero-jump retargeting.
+- **`mg-theme`**: Live `Light` / `Dark` color scheme x `Expressive` / `Standard` motion scheme binding (`GeekTheme`).
+- **`mg-render`**: Real-time `wgpu` WGSL SDF renderer (`RoundedBox`, 64-segment `M3ShapeMorph` across all 35 shapes, `WavyLinear` sinusoidal wave, `WavyCircularArc`) with `fwidth` anti-aliasing, premultiplied alpha blending, pixel-accurate clip stack, and `glyphon` / `cosmic-text` Roboto + Material Symbols rendering.
+- **`mg-components`**: **Complete Material 3 Expressive UI Framework** providing `UiState`, `UiContext`, layout containers (`ColumnLayout`, `RowLayout`), focus & keyboard management, built-in docked M3E `SoftKeyboard` (`ABC`, `123 / Date`, `#+=$`), gesture recognition (`Tap`, `ImmediateDragX`, `SwipeX`, `PullY`, `Dial`), stateful controllers (`DatePickerState`, `TimePickerState`, `TextFieldProps`, `SwipeDismissItem`, `PullRefreshState`), and reusable GPU widget methods for all 41 M3 Expressive components.
+- **`mg-android`**: Thin platform runner (`winit` window/touch/mouse/keyboard/IME event bridge + `wgpu` surface management) hosting the interactive 41-component catalog built on `mg-components`.
 
-Verified baseline: Jetpack Compose `material3:1.5.0-alpha` (`Compose-Material-3-Expressive-Catalog`) and Flutter `material_3_expressive` (`material_shapes.dart`, `loading_indicator.dart`, `wavy_progress_indicator.dart`).
+Verified against Jetpack Compose `material3:1.5.0-alpha` (`Compose-Material-3-Expressive-Catalog`) and Flutter `material_3_expressive`.
 
-## Status: Complete Material 3 Expressive GPU Port
+## Framework Usage Example
 
-| Layer | Status |
-|---|---|
-| `mg-tokens`: 45 color roles, 30 type styles, 10 corner token tiers + **35 Material 3 Expressive `RoundedPolygon` shapes & cubic Bézier `Morph`**, 6 elevations, easings/durations/springs | DONE |
-| `mg-motion`: Dynamic Motion with analytic springs + cubic-bezier + expressive/standard `MotionScheme` + zero-jump `retarget` | DONE, covered by physics tests |
-| `mg-theme`: light/dark x expressive/standard | DONE |
-| `mg-components`: 41 of 41 M3 Expressive components with spec constants and Props/State | DONE |
-| `mg-render`: Real-time `wgpu` WGSL SDF renderer (`RoundedBox`, 64-segment `M3ShapeMorph` across all 35 shapes, `WavyLinear` sinusoidal wave, `WavyCircularArc`) with derivative (`fwidth`) anti-aliasing, premultiplied alpha blending, pixel-accurate clipping, and `glyphon`/`cosmic-text` Roboto + Material Symbols rendering | DONE |
-| `mg-android`: Interactive 41-component Material 3 Expressive gallery (`LoadingIndicator` 7-shape morph, `LinearWavyProgressIndicator`, `CircularWavyProgressIndicator`, `HorizontalMultiBrowseCarousel` / `CenteredHeroCarousel`, connected `ButtonGroup` spring physics, `SplitButton`, `FabMenu`, `WavySlider`, etc.) | DONE |
+```rust
+use mg_components::{
+    ButtonProps, ColumnLayout, DatePickerState, Rect, SliderProps, TextFieldProps, UiContext,
+    UiState,
+};
+use mg_render::UiRenderer;
 
-## Key Architecture Highlights
+pub struct MyAppState {
+    pub ui: UiState,
+    pub email: TextFieldProps,
+    pub volume: SliderProps,
+    pub date_picker: DatePickerState,
+}
 
-- **35 Official Material 3 Expressive Shapes (`MaterialShape`)**: Exact port of `RoundedPolygon`, `CornerRounding`, `Cubic`, and `Morph` from `material_shapes.dart` / `androidx.graphics.shapes` (`Circle`, `Square`, `Slanted`, `Arch`, `Fan`, `Arrow`, `SemiCircle`, `Oval`, `Pill`, `Triangle`, `Diamond`, `ClamShell`, `Pentagon`, `Gem`, `Sunny`, `VerySunny`, `Cookie4Sided`, `Cookie6Sided`, `Cookie7Sided`, `Cookie9Sided`, `Cookie12Sided`, `Ghostish`, `Clover4Leaf`, `Clover8Leaf`, `Burst`, `SoftBurst`, `Boom`, `SoftBoom`, `Flower`, `Puffy`, `PuffyDiamond`, `PixelCircle`, `PixelTriangle`, `Bun`, `Heart`), uploaded to a GPU uniform contour bank and evaluated per-pixel in `shape.wgsl`.
-- **Authentic `LoadingIndicator` & `WavyProgressIndicator`**:
-  - `LoadingIndicator` and `ContainedLoadingIndicator` morph smoothly on the GPU across the 7 official M3E shapes (`SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval`) with continuous + step rotation.
-  - `LinearWavyProgressIndicator` and `CircularWavyProgressIndicator` (determinate & indeterminate) evaluate analytical sinusoidal wave SDFs in `shape.wgsl` with animated phase, amplitude tapering, `4dp` track gaps, and stop indicators.
-- **Crisp Anti-Aliased SDF & Premultiplied Alpha Pipeline**: Derivative-based `fwidth(d)` 1px edge smoothing, inset stroke SDFs, premultiplied linear sRGB output (`col.rgb * col.a`), and pixel-space clip stack (`push_clip` / `pop_clip`).
-- **Fixed `cosmic-text` / `glyphon` Text & Icon Engine**: Unbounded layout width (`16384px`) preventing single-word truncation on spaces, occurrence-indexed glyph metadata preventing depth collisions on repeated strings/icons, and non-occluding glyph depth testing.
+pub fn draw_frame(app: &mut MyAppState, renderer: &mut UiRenderer, width: f32, height: f32) {
+    let mut ctx = UiContext::begin(renderer, &mut app.ui, width, height);
+    let mut col = ColumnLayout::new(16.0, 24.0, ctx.width - 32.0, 16.0);
+
+    // Interactive TextField with hardware keyboard + built-in M3E touch keyboard
+    let tf_rect = col.next(56.0);
+    ctx.text_field("email_input", tf_rect, &mut app.email);
+
+    // Expressive WavySlider with live drag & floating value indicator bubble
+    let slider_rect = col.next(44.0);
+    ctx.slider("volume_slider", slider_rect, &mut app.volume);
+
+    // Expressive shape-morphing Filled Button
+    let btn_rect = col.next(40.0);
+    if ctx
+        .button_rect("submit_btn", btn_rect, &ButtonProps::filled("Save"))
+        .clicked
+    {
+        app.ui.toggle_dark_mode();
+    }
+
+    // Full M3 DatePicker with Calendar grid, Year picker, and Pencil ("edit") numeric DateInput mode
+    ctx.date_picker("booking_date", col.x, col.y, col.w, &mut app.date_picker);
+
+    ctx.draw_ripples();
+    ctx.draw_soft_keyboard();
+}
+```
+
+## Key Interactive Capabilities
+
+- **M3 `DatePicker` & `DateInput`**: Full Gregorian calendar grid, `<` / `>` month navigation, interactive Year picker grid (`2020..=2034`), and **Pencil (`edit` <-> `calendar_today`) mode toggle** switching into M3 numeric date entry (`MM/DD/YYYY`, `YYYY-MM-DD`, `DD.MM.YYYY`, `MMDDYYYY`) with live validation and quick presets.
+- **Full Text Input (`TextField`, `OutlinedTextField`, `SearchBar`)**: Hardware keyboard (`WindowEvent::KeyboardInput` + `Ime::Commit`) and built-in docked M3 Expressive **SoftKeyboard** (`ABC`, `123 / Date`, `#+=$`) for Android `NativeActivity` and touchscreens, with blinking caret, cursor movement, password visibility toggle (`visibility` / `visibility_off`), clear button, and character counter validation.
+- **`SwipeToDismiss` Physics**: Horizontal drag gesture (`ZoneKind::SwipeX`) with `DynamicSpring` snapback/dismissal, dynamic background pill reveal (`Archive` / `Delete`), threshold detection, and `Undo` / `Reset` restoration.
+- **`TimePicker` Dial & Numeric Input**: Drag-rotatable clock hand on 12-hour / 60-minute dial plus keyboard toggle (`keyboard` <-> `schedule`) for direct numeric Hour/Minute entry.
+- **`PullToRefresh`**: Vertical pull gesture (`ZoneKind::PullY`) with `ContainedLoadingIndicator` 7-shape morphing and live feed prepending.
+- **Live Theme & Motion Switching**: Instant toggle between `Dark` and `Light` M3 color schemes and `Expressive` vs `Standard` spring physics from the top app bar.
 
 ## Quick start
 
@@ -32,16 +72,6 @@ Verified baseline: Jetpack Compose `material3:1.5.0-alpha` (`Compose-Material-3-
 cargo test --workspace
 cargo run -p mg-demo
 ```
-
-## Workspace
-
-- `crates/mg-tokens`: Color, typography, elevation, motion, and 35 M3 Expressive `RoundedPolygon` + `Morph` shapes
-- `crates/mg-motion`: Analytic spring solver (`DynamicSpring`) and cubic-bezier easing
-- `crates/mg-theme`: Scheme and motion binding
-- `crates/mg-components`: Props/State and M3E geometry constants for all 41 components
-- `crates/mg-demo`: Headless core demo binary
-- `crates/mg-render`: Universal `wgpu` 2D SDF + `glyphon` text/icon renderer
-- `crates/mg-android`: Android (`NativeActivity`) and Linux desktop (`run_desktop`) interactive 41-component M3 Expressive gallery
 
 ## License
 
