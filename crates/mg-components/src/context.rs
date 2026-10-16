@@ -497,6 +497,10 @@ impl UiState {
         self.key_queue.push(key);
     }
 
+    pub fn has_hit(&self, x: f32, y: f32) -> bool {
+        self.hit_test(x, y).is_some()
+    }
+
     fn hit_test(&self, x: f32, y: f32) -> Option<HitZone> {
         let u = self.u();
         let top_bar_bottom = 102.0 * u;
