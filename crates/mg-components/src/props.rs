@@ -286,6 +286,16 @@ pub struct SwitchProps {
     pub with_icon: bool,
 }
 
+impl SwitchProps {
+    pub const fn new(on: bool) -> Self {
+        Self {
+            on,
+            enabled: true,
+            with_icon: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RadioProps {
     pub selected: bool,
@@ -307,6 +317,17 @@ impl SliderProps {
         Self {
             value,
             range: (0.0, 1.0),
+            steps: 0,
+            enabled: true,
+            vertical: false,
+            range_end: None,
+        }
+    }
+
+    pub const fn with_range(value: f32, min: f32, max: f32) -> Self {
+        Self {
+            value,
+            range: (min, max),
             steps: 0,
             enabled: true,
             vertical: false,

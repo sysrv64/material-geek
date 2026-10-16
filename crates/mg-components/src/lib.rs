@@ -10,6 +10,7 @@ pub mod context;
 pub mod props;
 #[rustfmt::skip]
 pub mod showcase;
+pub mod terminal_ui;
 #[rustfmt::skip]
 pub mod widgets;
 
@@ -21,6 +22,7 @@ pub use context::{
 pub use mg_tokens::elevation::ElevationLevel;
 pub use mg_tokens::shape::{MaterialShape, ShapeStyle};
 pub use props::*;
+pub use terminal_ui::*;
 use serde::{Deserialize, Serialize};
 pub use showcase::{CatalogState, APP_BAR_HEIGHT_DP, STATUS_BAR_INSET_DP};
 

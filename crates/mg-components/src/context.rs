@@ -122,6 +122,14 @@ impl Rect {
     pub fn contains(self, x: f32, y: f32) -> bool {
         x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
     }
+
+    pub fn cx(self) -> f32 {
+        self.x + self.w * 0.5
+    }
+
+    pub fn cy(self) -> f32 {
+        self.y + self.h * 0.5
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -180,6 +188,11 @@ pub struct Palette {
     pub card: [f32; 4],
     pub card_hi: [f32; 4],
     pub card_highest: [f32; 4],
+    pub surface_container_low: [f32; 4],
+    pub surface_container: [f32; 4],
+    pub surface_container_high: [f32; 4],
+    pub surface_container_highest: [f32; 4],
+    pub scrim: [f32; 4],
     pub text: [f32; 4],
     pub sub: [f32; 4],
     pub primary: [f32; 4],
@@ -212,6 +225,11 @@ impl Palette {
             card: argb_to_f32(s.surface_container),
             card_hi: argb_to_f32(s.surface_container_high),
             card_highest: argb_to_f32(s.surface_container_highest),
+            surface_container_low: argb_to_f32(s.surface_container_low),
+            surface_container: argb_to_f32(s.surface_container),
+            surface_container_high: argb_to_f32(s.surface_container_high),
+            surface_container_highest: argb_to_f32(s.surface_container_highest),
+            scrim: argb_to_f32(s.scrim),
             text: argb_to_f32(s.on_surface),
             sub: argb_to_f32(s.on_surface_variant),
             primary: argb_to_f32(s.primary),
