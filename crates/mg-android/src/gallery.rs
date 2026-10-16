@@ -2,14 +2,18 @@ use mg_components::ComponentId;
 use mg_motion::{cubic_bezier_y, DynamicSpring, MotionScheme, Tempo, Track};
 use mg_render::{
     m3_text_style, MaterialShape, TextStyle, TypeStyle, UiRenderer, M3_BODY_LARGE, M3_BODY_MEDIUM,
-    M3_BODY_SMALL, M3_DISPLAY_SMALL, M3_HEADLINE_SMALL, M3_LABEL_LARGE, M3_LABEL_MEDIUM,
-    M3_LABEL_SMALL, M3_TITLE_LARGE, M3_TITLE_MEDIUM, M3_TITLE_SMALL,
+    M3_BODY_SMALL, M3_DISPLAY_SMALL, M3_HEADLINE_MEDIUM, M3_HEADLINE_SMALL, M3_LABEL_LARGE,
+    M3_LABEL_MEDIUM, M3_LABEL_SMALL, M3_TITLE_LARGE, M3_TITLE_MEDIUM, M3_TITLE_SMALL,
 };
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::Arc;
 use std::time::Instant;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 use winit::window::Window;
+
+/// Status-bar safe-area inset in dp so the top app bar never overlaps the phone's status bar.
+const STATUS_BAR_INSET_DP: f32 = 38.0;
+const APP_BAR_HEIGHT_DP: f32 = 64.0;
 
 fn srgb(byte: u8) -> f32 {
     byte as f32 / 255.0
@@ -75,6 +79,20 @@ fn text_c(ui: &mut UiRenderer, s: &str, cx: f32, y_top: f32, style: TextStyle) {
     ui.text(s, cx - tw * 0.5, y_top, style);
 }
 
+/// Evaluates one timed segment of a linear indeterminate cycle (`M3EProgressIndicatorUtils.evaluateIndeterminateSegment`).
+fn eval_indet_segment(t_cycle: f32, delay_ms: f32, duration_ms: f32, total_ms: f32) -> f32 {
+    let start = delay_ms / total_ms;
+    let end = (delay_ms + duration_ms) / total_ms;
+    if t_cycle <= start {
+        0.0
+    } else if t_cycle >= end {
+        1.0
+    } else {
+        let local_t = (t_cycle - start) / (end - start);
+        cubic_bezier_y(local_t, 0.3, 0.0, 0.8, 0.15)
+    }
+}
+
 /// Evaluates the M3 Expressive 7-shape loading sequence (`SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval`)
 /// returning `(shape_a, shape_b, morph_t, rotation_rad, scale_factor)`.
 fn loading_morph_state(
@@ -86,7 +104,6 @@ fn loading_morph_state(
     let total = t / cycle_dur + phase_offset as f32;
     let step = total.floor() as usize;
     let local = total.fract();
-    // Expressive spring-like fast morph during the first 68% of each step, with subtle overshoot settle
     let morph_t = if local < 0.68 {
         let u = local / 0.68;
         cubic_bezier_y(u, 0.22, 1.0, 0.36, 1.0)
@@ -95,7 +112,6 @@ fn loading_morph_state(
     };
     let shape_a = seq[step % seq.len()];
     let shape_b = seq[(step + 1) % seq.len()];
-    // Continuous global rotation (4.666s period) + 90deg step progression
     let rot = t * (TAU / 4.666) + (step as f32 + morph_t) * FRAC_PI_2;
     let scale = 1.0 - 0.06 * (morph_t * PI).sin();
     (shape_a, shape_b, morph_t, rot, scale)
@@ -120,11 +136,14 @@ enum Action {
     CarouselMode(usize),
     DateDay(usize),
     TimeAmPm(bool),
+    TimeFieldMode(bool),
+    TimeDial(usize),
     ToggleBtn(usize),
     IconToggle(usize),
     ExtendedFabToggle,
     SplitTrailing(usize),
     FabMenu,
+    FabMenuItem(usize),
     Button(u32),
     Slider,
 }
@@ -249,6 +268,14 @@ pub struct Gallery {
     morph_key: u32,
     group_press: DynamicSpring,
     group_pressed_idx: Option<usize>,
+    group_sel: usize,
+    group_sel_anim: [DynamicSpring; 4],
+    std_group_sel: [bool; 4],
+    std_group_anim: [DynamicSpring; 4],
+    seg_press: DynamicSpring,
+    seg_pressed_idx: Option<usize>,
+    segmented: usize,
+    seg_anim: [DynamicSpring; 3],
     slider_thumb: DynamicSpring,
     slider: f32,
     focus: DynamicSpring,
@@ -272,20 +299,27 @@ pub struct Gallery {
     fab_anim: DynamicSpring,
     split_open: [bool; 2],
     split_anim: [DynamicSpring; 2],
-    group_sel: usize,
-    std_group_sel: [bool; 4],
     tabs: usize,
+    tab_pos: DynamicSpring,
     sec_tabs: usize,
+    sec_tab_pos: DynamicSpring,
     nav: usize,
+    nav_pos: DynamicSpring,
     rail: usize,
+    rail_pos: DynamicSpring,
     drawer: usize,
-    segmented: usize,
+    drawer_pos: DynamicSpring,
     menu_sel: usize,
     carousel: usize,
     carousel_mode: usize,
     carousel_pos: DynamicSpring,
     date_day: usize,
+    date_anim: DynamicSpring,
     time_am: bool,
+    time_minute_mode: bool,
+    time_hour_idx: usize,
+    time_min_idx: usize,
+    time_angle: DynamicSpring,
     zones: Vec<(Action, Rect, [f32; 4])>,
 }
 
@@ -301,6 +335,11 @@ impl Gallery {
         let chips = [false, true, true, false];
         let toggle_btns = [true, false, false];
         let icon_toggles = [true, false, true, false];
+        let group_sel = 1usize;
+        let std_group_sel = [true, false, true, false];
+        let segmented = 0usize;
+        // Initial hour = 10 -> index 10 on 12-hour dial (angle = -PI/2 + 10 * TAU / 12)
+        let init_angle = -FRAC_PI_2 + 10.0 * (TAU / 12.0);
         Self {
             pal: Palette::dark(),
             u: 1.0,
@@ -320,6 +359,23 @@ impl Gallery {
             morph_key: 0,
             group_press: DynamicSpring::new(0.0, 0.0, fs),
             group_pressed_idx: None,
+            group_sel,
+            group_sel_anim: std::array::from_fn(|i| {
+                let v = f32::from(i == group_sel);
+                DynamicSpring::new(v, v, fs)
+            }),
+            std_group_sel,
+            std_group_anim: std::array::from_fn(|i| {
+                let v = f32::from(std_group_sel[i]);
+                DynamicSpring::new(v, v, fs)
+            }),
+            seg_press: DynamicSpring::new(0.0, 0.0, fs),
+            seg_pressed_idx: None,
+            segmented,
+            seg_anim: std::array::from_fn(|i| {
+                let v = f32::from(i == segmented);
+                DynamicSpring::new(v, v, fs)
+            }),
             slider_thumb: DynamicSpring::new(0.0, 0.0, fs),
             slider: 0.62,
             focus: DynamicSpring::new(0.0, 1.0, dfx),
@@ -367,20 +423,27 @@ impl Gallery {
                 DynamicSpring::new(0.0, 0.0, fs),
                 DynamicSpring::new(0.0, 0.0, fs),
             ],
-            group_sel: 1,
-            std_group_sel: [true, false, true, false],
             tabs: 0,
+            tab_pos: DynamicSpring::new(0.0, 0.0, ds),
             sec_tabs: 1,
+            sec_tab_pos: DynamicSpring::new(1.0, 1.0, ds),
             nav: 0,
+            nav_pos: DynamicSpring::new(0.0, 0.0, ds),
             rail: 0,
+            rail_pos: DynamicSpring::new(0.0, 0.0, ds),
             drawer: 0,
-            segmented: 0,
+            drawer_pos: DynamicSpring::new(0.0, 0.0, ds),
             menu_sel: 1,
             carousel: 0,
             carousel_mode: 0,
             carousel_pos: DynamicSpring::new(0.0, 0.0, ds),
             date_day: 15,
+            date_anim: DynamicSpring::new(1.0, 1.0, fs),
             time_am: true,
+            time_minute_mode: false,
+            time_hour_idx: 10,
+            time_min_idx: 5, // 25 min
+            time_angle: DynamicSpring::new(init_angle, init_angle, ds),
             zones: Vec::new(),
         }
     }
@@ -397,11 +460,28 @@ impl Gallery {
         let dt = dt.clamp(0.0, 1.0 / 15.0);
         self.morph.step(dt);
         self.group_press.step(dt);
+        self.seg_press.step(dt);
         self.slider_thumb.step(dt);
         self.focus.step(dt);
         self.ext_fab_anim.step(dt);
         self.fab_anim.step(dt);
         self.carousel_pos.step(dt);
+        self.tab_pos.step(dt);
+        self.sec_tab_pos.step(dt);
+        self.nav_pos.step(dt);
+        self.rail_pos.step(dt);
+        self.drawer_pos.step(dt);
+        self.date_anim.step(dt);
+        self.time_angle.step(dt);
+        for s in &mut self.group_sel_anim {
+            s.step(dt);
+        }
+        for s in &mut self.std_group_anim {
+            s.step(dt);
+        }
+        for s in &mut self.seg_anim {
+            s.step(dt);
+        }
         for s in &mut self.switch_anim {
             s.step(dt);
         }
@@ -480,6 +560,10 @@ impl Gallery {
             self.group_pressed_idx = Some(idx);
             self.group_press.retarget(1.0);
         }
+        if let Action::Segmented(idx) = action {
+            self.seg_pressed_idx = Some(idx);
+            self.seg_press.retarget(1.0);
+        }
     }
 
     pub fn move_to(&mut self, x: f32, y: f32) {
@@ -539,6 +623,9 @@ impl Gallery {
         }
         if self.group_press.target != 0.0 {
             self.group_press.retarget(0.0);
+        }
+        if self.seg_press.target != 0.0 {
+            self.seg_press.retarget(0.0);
         }
         if self.slider_thumb.target != 0.0 && !self.slider_drag {
             self.slider_thumb.retarget(0.0);
@@ -606,14 +693,42 @@ impl Gallery {
                 self.split_open[i] = !self.split_open[i];
                 self.split_anim[i].retarget(f32::from(self.split_open[i]));
             }
-            Action::Tab(i) => self.tabs = i,
-            Action::SecondaryTab(i) => self.sec_tabs = i,
-            Action::Nav(i) => self.nav = i,
-            Action::Rail(i) => self.rail = i,
-            Action::Drawer(i) => self.drawer = i,
-            Action::Group(i) => self.group_sel = i,
-            Action::StdGroup(i) => self.std_group_sel[i] = !self.std_group_sel[i],
-            Action::Segmented(i) => self.segmented = i,
+            Action::Tab(i) => {
+                self.tabs = i;
+                self.tab_pos.retarget(i as f32);
+            }
+            Action::SecondaryTab(i) => {
+                self.sec_tabs = i;
+                self.sec_tab_pos.retarget(i as f32);
+            }
+            Action::Nav(i) => {
+                self.nav = i;
+                self.nav_pos.retarget(i as f32);
+            }
+            Action::Rail(i) => {
+                self.rail = i;
+                self.rail_pos.retarget(i as f32);
+            }
+            Action::Drawer(i) => {
+                self.drawer = i;
+                self.drawer_pos.retarget(i as f32);
+            }
+            Action::Group(i) => {
+                self.group_sel = i;
+                for (j, s) in self.group_sel_anim.iter_mut().enumerate() {
+                    s.retarget(f32::from(j == i));
+                }
+            }
+            Action::StdGroup(i) => {
+                self.std_group_sel[i] = !self.std_group_sel[i];
+                self.std_group_anim[i].retarget(f32::from(self.std_group_sel[i]));
+            }
+            Action::Segmented(i) => {
+                self.segmented = i;
+                for (j, s) in self.seg_anim.iter_mut().enumerate() {
+                    s.retarget(f32::from(j == i));
+                }
+            }
             Action::MenuItem(i) => self.menu_sel = i,
             Action::CarouselPage(i) => {
                 self.carousel = i;
@@ -626,11 +741,39 @@ impl Gallery {
                     self.carousel_pos.retarget(1.0);
                 }
             }
-            Action::DateDay(d) => self.date_day = d,
+            Action::DateDay(d) => {
+                self.date_day = d;
+                self.date_anim.x = 0.4;
+                self.date_anim.retarget(1.0);
+            }
             Action::TimeAmPm(am) => self.time_am = am,
+            Action::TimeFieldMode(min_mode) => {
+                self.time_minute_mode = min_mode;
+                let idx = if min_mode {
+                    self.time_min_idx
+                } else {
+                    self.time_hour_idx
+                };
+                let target_ang = -FRAC_PI_2 + idx as f32 * (TAU / 12.0);
+                self.time_angle.retarget(target_ang);
+            }
+            Action::TimeDial(idx) => {
+                if self.time_minute_mode {
+                    self.time_min_idx = idx % 12;
+                } else {
+                    self.time_hour_idx = idx % 12;
+                }
+                let target_ang = -FRAC_PI_2 + (idx % 12) as f32 * (TAU / 12.0);
+                self.time_angle.retarget(target_ang);
+            }
             Action::FabMenu => {
                 self.fab_open = !self.fab_open;
                 self.fab_anim.retarget(f32::from(self.fab_open));
+            }
+            Action::FabMenuItem(_) => {
+                // In original M3 Expressive FloatingActionButtonMenu, selecting any menu item collapses the menu.
+                self.fab_open = false;
+                self.fab_anim.retarget(0.0);
             }
             Action::Button(_) | Action::Slider => {}
         }
@@ -756,7 +899,7 @@ impl Gallery {
         2.0
     }
 
-    /// Renders a Material 3 Expressive circular progress indicator (flat or wavy) with track gap.
+    /// Renders a Material 3 Expressive circular progress indicator (flat or wavy) with front & back track gaps.
     #[allow(clippy::too_many_arguments)]
     fn draw_circular_progress(
         &self,
@@ -773,19 +916,22 @@ impl Gallery {
         let sweep_clamped = sweep_deg.clamp(0.0, 360.0);
         let start_rad = start_deg.to_radians();
         let sweep_rad = sweep_clamped.to_radians();
-        let mid_r = (outer_r - stroke_w * 0.5).max(1.0);
-        // Gap between active indicator caps and track caps: 4dp + stroke cap radius
+        // Match M3ECircularProgressTheme: waveAmplitude = 1.65dp, wavelength = 15dp (~9 cycles on 48dp ring)
+        let max_amp = if wavy { 1.65 * u } else { 0.0 };
+        let base_r = (outer_r - stroke_w * 0.5 - max_amp).max(1.0);
         let gap_rad = if sweep_clamped > 2.0 && sweep_clamped < 356.0 {
-            ((4.0 * u + stroke_w) / mid_r).min(0.42)
+            ((4.0 * u + stroke_w) / base_r).min(0.42)
         } else {
             0.0
         };
         let track_sweep = (TAU - sweep_rad - 2.0 * gap_rad).max(0.0);
         if track_sweep > 0.02 {
+            // Draw flat circular track at the exact same base_r as the wavy indicator!
+            let track_outer = base_r + stroke_w * 0.5;
             ui.arc_ring(
                 cx,
                 cy,
-                outer_r,
+                track_outer,
                 stroke_w,
                 start_rad + sweep_rad + gap_rad,
                 track_sweep,
@@ -795,18 +941,18 @@ impl Gallery {
         if sweep_rad > 0.01 {
             if wavy {
                 let amp_factor =
-                    ((sweep_clamped / 30.0).min((360.0 - sweep_clamped) / 25.0)).clamp(0.25, 1.0);
-                let amp = 2.5 * u * amp_factor;
-                let phase = -self.t * 6.5;
+                    ((sweep_clamped / 25.0).min((360.0 - sweep_clamped) / 20.0)).clamp(0.35, 1.0);
+                let amp = max_amp * amp_factor;
+                let phase = -self.t * 6.0;
                 ui.wavy_arc_ring(
                     cx,
                     cy,
-                    outer_r,
+                    base_r + stroke_w * 0.5 + amp,
                     stroke_w,
                     start_rad,
                     sweep_rad,
                     amp,
-                    8.0,
+                    9.0,
                     phase,
                     self.pal.primary,
                 );
@@ -835,7 +981,8 @@ impl Gallery {
         let pad = 16.0 * u;
         let card_x = 8.0 * u;
         let card_w = width - 16.0 * u;
-        let mut y = 76.0 * u - self.scroll;
+        let top_total = (STATUS_BAR_INSET_DP + APP_BAR_HEIGHT_DP) * u;
+        let mut y = top_total + 14.0 * u - self.scroll;
         for id in ComponentId::ALL {
             let title = Self::component_title(id);
             ui.text(title, pad, y, ts(M3_LABEL_LARGE, self.pal.primary, u));
@@ -869,7 +1016,7 @@ impl Gallery {
             );
             y = card_y + body_h + 32.0 * u + 20.0 * u;
         }
-        self.content_h = y + self.scroll + 16.0 * u;
+        self.content_h = y + self.scroll + 24.0 * u;
         self.scroll_by(0.0);
         self.draw_app_bar(ui, width);
     }
@@ -905,8 +1052,8 @@ impl Gallery {
             ComponentId::TextField => "TextField & OutlinedTextField",
             ComponentId::Menu => "DropdownMenuPopup (Expressive Grouped)",
             ComponentId::Carousel => "HorizontalMultiBrowse & CenteredHero Carousel",
-            ComponentId::DatePicker => "DatePicker",
-            ComponentId::TimePicker => "TimePicker",
+            ComponentId::DatePicker => "DatePickerDialog",
+            ComponentId::TimePicker => "TimePickerDialog (Dial & Period Control)",
             ComponentId::Tooltip => "PlainTooltip & RichTooltip",
             ComponentId::Snackbar => "Snackbar",
             ComponentId::Badge => "Badge",
@@ -927,7 +1074,7 @@ impl Gallery {
             ComponentId::Carousel => "28dp corners, dynamic hero squish, uniform height",
             ComponentId::ButtonGroup => "Spring width physics + corner morphing",
             ComponentId::SplitButton => "Asymmetric 20dp/4dp corners + circular morph",
-            ComponentId::FabMenu => "Expressive spring menu items + rotating trigger",
+            ComponentId::FabMenu => "Expressive spring menu items + auto-collapse",
             ComponentId::Slider => "16dp track, 4x44dp handle, track gap & wavy track",
             _ => "Material 3 Expressive",
         }
@@ -935,12 +1082,14 @@ impl Gallery {
 
     fn draw_app_bar(&mut self, ui: &mut UiRenderer, width: f32) {
         let u = self.u;
-        ui.rect(0.0, 0.0, width, 64.0 * u, self.pal.bg, r4(0.0));
-        // Expressive M3 shape badge in top app bar
+        let top_inset = STATUS_BAR_INSET_DP * u;
+        let bar_h = APP_BAR_HEIGHT_DP * u;
+        let total_h = top_inset + bar_h;
+        ui.rect(0.0, 0.0, width, total_h, self.pal.bg, r4(0.0));
         let (sa, sb, mt, rot, _) = loading_morph_state(self.t, 0);
         ui.m3_shape_morph(
             28.0 * u,
-            32.0 * u,
+            top_inset + 32.0 * u,
             30.0 * u,
             sa,
             sb,
@@ -953,14 +1102,14 @@ impl Gallery {
         ui.text(
             "Material 3 Expressive",
             52.0 * u,
-            18.0 * u,
+            top_inset + 18.0 * u,
             ts(M3_TITLE_LARGE, self.pal.text, u),
         );
         self.icon_button(
             ui,
             101,
             width - 92.0 * u,
-            12.0 * u,
+            top_inset + 12.0 * u,
             "search",
             IconBtn::Tonal,
         );
@@ -968,13 +1117,13 @@ impl Gallery {
             ui,
             102,
             width - 46.0 * u,
-            12.0 * u,
+            top_inset + 12.0 * u,
             "more_vert",
             IconBtn::Standard,
         );
         ui.rect(
             0.0,
-            63.0 * u,
+            total_h - 1.0 * u,
             width,
             1.0 * u,
             self.pal.outline_variant,
@@ -996,7 +1145,7 @@ impl Gallery {
             ComponentId::Switch => 136.0 * u,
             ComponentId::RadioButton => 120.0 * u,
             ComponentId::Slider => 132.0 * u,
-            ComponentId::ProgressIndicator => 168.0 * u,
+            ComponentId::ProgressIndicator => 172.0 * u,
             ComponentId::LoadingIndicator => 136.0 * u,
             ComponentId::AssistChip
             | ComponentId::FilterChip
@@ -1013,8 +1162,8 @@ impl Gallery {
             ComponentId::TextField => 148.0 * u,
             ComponentId::Menu => 216.0 * u,
             ComponentId::Carousel => 218.0 * u,
-            ComponentId::DatePicker => 296.0 * u,
-            ComponentId::TimePicker => 212.0 * u,
+            ComponentId::DatePicker => 444.0 * u,
+            ComponentId::TimePicker => 436.0 * u,
             ComponentId::Tooltip => 124.0 * u,
             ComponentId::Snackbar => 64.0 * u,
             ComponentId::Badge => 56.0 * u,
@@ -1050,19 +1199,19 @@ impl Gallery {
         let pad_h = if variant == Btn::Text {
             12.0 * u
         } else {
-            20.0 * u
+            18.0 * u
         };
         let icon_w = if icon.is_some() { 26.0 * u } else { 0.0 };
         let mut w = pad_h + icon_w + tw + pad_h;
-        if !matches!(variant, Btn::Text) && w < 58.0 * u {
-            w = 58.0 * u;
+        if !matches!(variant, Btn::Text) && w < 56.0 * u {
+            w = 56.0 * u;
         }
-        // M3 Expressive button shapes morph from Full pill (20dp) to Small corner (8dp) when pressed
-        let radius = if self.morph_key == id {
-            lerp(h * 0.5, 8.0 * u, self.morph.x.clamp(0.0, 1.0))
+        let press_t = if self.morph_key == id {
+            self.morph.x.clamp(0.0, 1.0)
         } else {
-            h * 0.5
+            0.0
         };
+        let radius = lerp(h * 0.5, 8.0 * u, press_t);
         if variant == Btn::Elevated {
             ui.rect(
                 x,
@@ -1114,7 +1263,6 @@ impl Gallery {
         let pad_h = 16.0 * u;
         let icon_w = 24.0 * u;
         let w = pad_h + icon_w + tw + pad_h;
-        // M3 Expressive ToggleButton: unchecked = full pill (20dp), checked = 12dp rounded rect, pressed = 8dp
         let pressed_f = if self.is_pressed(Action::ToggleBtn(idx)) {
             1.0
         } else {
@@ -1124,13 +1272,13 @@ impl Gallery {
         let radius = lerp(base_r, 8.0 * u, pressed_f);
         let rect = Rect { x, y, w, h };
         ui.rect(x, y, w, h, fill, r4(radius));
-        if !checked {
+        if anim < 0.99 {
             ui.stroke(
                 x,
                 y,
                 w,
                 h,
-                with_alpha(self.pal.outline_variant, 1.0 - anim),
+                with_alpha(self.pal.outline, 1.0 - anim),
                 r4(radius),
                 1.0 * u,
             );
@@ -1247,7 +1395,7 @@ impl Gallery {
         size
     }
 
-    fn draw_checkbox(&mut self, ui: &mut UiRenderer, i: usize, x: f32, ry: f32, label: &str) {
+    fn draw_checkbox(&mut self, ui: &mut UiRenderer, i: usize, x: f32, ry: f32, title: &str) {
         let u = self.u;
         let st = self.check_state[i];
         let ca = if st == 0 {
@@ -1280,7 +1428,7 @@ impl Gallery {
                 18.0 * u,
                 18.0 * u,
                 with_alpha(self.pal.primary, ca),
-                r4(3.0 * u),
+                r4(3.5 * u),
             );
         }
         if ca < 1.0 {
@@ -1290,7 +1438,7 @@ impl Gallery {
                 18.0 * u,
                 18.0 * u,
                 with_alpha(self.pal.outline, 1.0 - ca),
-                r4(3.0 * u),
+                r4(3.5 * u),
                 2.0 * u,
             );
         }
@@ -1299,26 +1447,31 @@ impl Gallery {
                 bx + 4.0 * u,
                 by + 8.0 * u,
                 10.0 * u,
-                2.0 * u,
+                2.2 * u,
                 with_alpha(self.pal.on_primary, ca),
-                r4(1.0 * u),
+                r4(1.1 * u),
             );
         } else if cf > 0.02 {
-            // Analytical 2-segment vector checkmark drawn with `stroke_line` (no broken icon clipping)
-            let p0 = [bx + 4.0 * u, by + 9.2 * u];
-            let p1 = [bx + 7.6 * u, by + 12.8 * u];
-            let p2 = [bx + 14.2 * u, by + 5.6 * u];
+            let p0 = [bx + 3.8 * u, by + 9.2 * u];
+            let p1 = [bx + 7.6 * u, by + 13.0 * u];
+            let p2 = [bx + 14.4 * u, by + 5.4 * u];
             let seg1 = (cf / 0.42).clamp(0.0, 1.0);
             let e1 = [lerp(p0[0], p1[0], seg1), lerp(p0[1], p1[1], seg1)];
-            ui.stroke_line(p0, e1, 2.0 * u, self.pal.on_primary);
+            ui.stroke_line(p0, e1, 2.2 * u, self.pal.on_primary);
             if cf > 0.42 {
                 let seg2 = ((cf - 0.42) / 0.58).clamp(0.0, 1.0);
                 let e2 = [lerp(p1[0], p2[0], seg2), lerp(p1[1], p2[1], seg2)];
-                ui.stroke_line(p1, e2, 2.0 * u, self.pal.on_primary);
+                ui.stroke_line(p1, e2, 2.2 * u, self.pal.on_primary);
             }
         }
+        let state_str = match st {
+            0 => "Unchecked",
+            1 => "Checked",
+            _ => "Indeterminate",
+        };
+        let full_label = format!("{title} • {state_str}");
         ui.text(
-            label,
+            &full_label,
             x + 48.0 * u,
             ry + 8.0 * u,
             ts(M3_BODY_LARGE, self.pal.text, u),
@@ -1328,7 +1481,7 @@ impl Gallery {
             Rect {
                 x,
                 y: ry,
-                w: 240.0 * u,
+                w: 280.0 * u,
                 h: 40.0 * u,
             },
             self.pal.text,
@@ -1382,15 +1535,9 @@ impl Gallery {
         );
         let thumb = mix(self.pal.outline, self.pal.on_primary, anim);
         ui.circle(x + cx, cy, size * 0.5, thumb);
+        // High-contrast M3 Switch icon inside thumb: `primary` (#D0BCFF) on `on_primary` (#381E72) when ON
         if on && (with_icons || anim > 0.5) {
-            icon_c(
-                ui,
-                "check",
-                x + cx,
-                cy,
-                16.0 * u,
-                self.pal.primary_container,
-            );
+            icon_c(ui, "check", x + cx, cy, 16.0 * u, self.pal.primary);
         } else if !on && with_icons {
             icon_c(ui, "close", x + cx, cy, 16.0 * u, self.pal.card_highest);
         }
@@ -1405,7 +1552,7 @@ impl Gallery {
             Rect {
                 x,
                 y: ry,
-                w: 240.0 * u,
+                w: 260.0 * u,
                 h: 44.0 * u,
             },
             self.pal.text,
@@ -1530,7 +1677,6 @@ impl Gallery {
         let u = self.u;
         match id {
             ComponentId::Button => {
-                // Row 1: Standard 5 M3 variants with press corner morph
                 let mut bx = x;
                 bx += self.draw_button(
                     ui,
@@ -1602,7 +1748,6 @@ impl Gallery {
 
                 // Row 3: M3 Expressive Size Tiers (XS 32dp, S 40dp, M 52dp)
                 let sy = y + 96.0 * u;
-                // XS (32dp)
                 ui.rect(
                     x,
                     sy + 10.0 * u,
@@ -1618,7 +1763,6 @@ impl Gallery {
                     sy + 18.0 * u,
                     ts(M3_LABEL_MEDIUM, self.pal.on_secondary_container, u),
                 );
-                // S (40dp)
                 ui.rect(
                     x + 84.0 * u,
                     sy + 6.0 * u,
@@ -1634,7 +1778,6 @@ impl Gallery {
                     sy + 16.0 * u,
                     ts(M3_LABEL_LARGE, self.pal.on_primary_container, u),
                 );
-                // M (52dp Expressive hero CTA)
                 let mw = (w - 180.0 * u).max(160.0 * u);
                 let mx = x + 178.0 * u;
                 let m_id = 6;
@@ -1669,7 +1812,6 @@ impl Gallery {
                 self.zone(Action::Button(m_id), m_rect, self.pal.on_primary);
             }
             ComponentId::IconButton => {
-                // Row 1: Standard, Filled, Tonal, Outlined + Wide (52x40) & Narrow (32x40) M3E shapes
                 let variants = [
                     IconBtn::Standard,
                     IconBtn::Filled,
@@ -1687,7 +1829,6 @@ impl Gallery {
                         v,
                     );
                 }
-                // Wide Filled IconButton (52x40dp)
                 self.icon_button_sized(
                     ui,
                     14,
@@ -1698,7 +1839,6 @@ impl Gallery {
                     "mic",
                     IconBtn::Filled,
                 );
-                // Narrow Tonal IconButton (32x40dp)
                 self.icon_button_sized(
                     ui,
                     15,
@@ -1710,7 +1850,6 @@ impl Gallery {
                     IconBtn::Tonal,
                 );
 
-                // Row 2: Interactive Toggleable IconButtons (morph between circle 20dp and square 12dp)
                 let ty = y + 56.0 * u;
                 let t_icons = ["favorite", "bookmark", "notifications", "wifi"];
                 for (i, ic) in t_icons.into_iter().enumerate() {
@@ -1739,7 +1878,6 @@ impl Gallery {
                 );
             }
             ComponentId::Fab => {
-                // Small (40dp, r=12), Medium (56dp, r=16), Large (80dp, r=24, icon=36dp) + M3Shape Sunny FAB
                 let mut fx = x;
                 fx += self.fab_styled(
                     ui,
@@ -1777,7 +1915,6 @@ impl Gallery {
                     "palette",
                     36.0 * u,
                 ) + 20.0 * u;
-                // Expressive Cookie9Sided / Sunny morphing FAB
                 let cx = fx + 32.0 * u;
                 let cy = y + 40.0 * u;
                 ui.m3_shape(
@@ -1793,7 +1930,6 @@ impl Gallery {
                 icon_c(ui, "star", cx, cy, 26.0 * u, self.pal.on_primary);
             }
             ComponentId::ExtendedFab => {
-                // Interactive spring-expanding ExtendedFAB + Tonal ExtendedFAB
                 let anim = self.ext_fab_anim.x.clamp(0.0, 1.0);
                 let ink = self.pal.on_primary_container;
                 let style = ts(M3_LABEL_LARGE, ink, u);
@@ -1826,7 +1962,7 @@ impl Gallery {
                 self.layer(ui, Action::ExtendedFabToggle, rect, 16.0 * u, ink);
                 self.draw_ripples(ui, rect);
                 icon_c(ui, "edit", x + 28.0 * u, rect.y + 28.0 * u, 24.0 * u, ink);
-                if anim > 0.15 {
+                if anim > 0.08 {
                     ui.push_clip([x, rect.y, fw - 8.0 * u, 56.0 * u]);
                     ui.text(
                         "New message",
@@ -1838,7 +1974,6 @@ impl Gallery {
                 }
                 self.zone(Action::ExtendedFabToggle, rect, ink);
 
-                // Secondary Tonal Extended FAB
                 let sx = x + fw + 14.0 * u;
                 let s_ink = self.pal.on_secondary_container;
                 let s_style = ts(M3_LABEL_LARGE, s_ink, u);
@@ -1881,8 +2016,8 @@ impl Gallery {
             }
             ComponentId::FabMenu => {
                 // Authentic M3 Expressive FloatingActionButtonMenu:
-                // Full-pill items (50dp height, r=25dp) in primary_container containing icon + label,
-                // expanding upward with spring animation from a morphing ToggleFloatingActionButton!
+                // 1) State layer and ripples are drawn BEFORE icon & text so text NEVER disappears on press!
+                // 2) Tapping any menu item triggers Action::FabMenuItem(i), collapsing the menu as in the M3E spec.
                 let open_t = self.fab_anim.x.clamp(0.0, 1.0);
                 let items = [
                     ("flight", "Book flight"),
@@ -1910,16 +2045,16 @@ impl Gallery {
                         w: iw,
                         h: ih,
                     };
+                    let act = Action::FabMenuItem(i);
                     ui.rect(x, iy, iw, ih, fill, r4(r));
+                    self.layer(ui, act, rect, r, self.pal.on_primary_container);
+                    self.draw_ripples(ui, rect);
                     icon_c(ui, ic, x + 26.0 * u, iy + ih * 0.5, 20.0 * u, ink);
-                    if stagger > 0.3 {
-                        ui.push_clip([x, iy, iw - 10.0 * u, ih]);
+                    if stagger > 0.05 {
+                        ui.push_clip([x, iy, (iw - 10.0 * u).max(0.0), ih]);
                         ui.text(lb, x + 46.0 * u, iy + ih * 0.5 - style.line_h * 0.5, style);
                         ui.pop_clip();
                     }
-                    let act = Action::Button(200 + i as u32);
-                    self.layer(ui, act, rect, r, self.pal.on_primary_container);
-                    self.draw_ripples(ui, rect);
                     self.zone(act, rect, self.pal.on_primary_container);
                 }
                 let fy = y + 214.0 * u;
@@ -1939,16 +2074,17 @@ impl Gallery {
                     24.0 * u,
                 );
                 ui.text(
-                    "Tap trigger FAB to toggle Expressive menu",
+                    if self.fab_open {
+                        "Tap any item or X to collapse menu"
+                    } else {
+                        "Tap + to expand Expressive FAB menu"
+                    },
                     x + 72.0 * u,
                     fy + 18.0 * u,
                     ts(M3_BODY_SMALL, self.pal.sub, u),
                 );
             }
             ComponentId::SplitButton => {
-                // Authentic M3 Expressive SplitButtonLayout:
-                // Leading button ([20, 4, 4, 20] radii) + 2dp real gap + Trailing button (48x40dp,
-                // [4, 20, 20, 4] when closed, morphing to full 20dp circle when open!)
                 let h = 40.0 * u;
                 let variants = [
                     (
@@ -2007,7 +2143,6 @@ impl Gallery {
                     );
                     self.zone(Action::Button(btn_id), lead_rect, ink);
 
-                    // 2dp real gap + Trailing button (44x40dp)
                     let tx = sx + lead_w + 2.0 * u;
                     let tw = 44.0 * u;
                     let open_anim = self.split_anim[idx].x.clamp(0.0, 1.0);
@@ -2022,62 +2157,46 @@ impl Gallery {
                     ui.rect(tx, trail_rect.y, tw, h, fill, trail_radii);
                     self.layer_radii(ui, Action::SplitTrailing(idx), trail_rect, trail_radii, ink);
                     self.draw_ripples(ui, trail_rect);
-                    // Draw crisp chevron that rotates 180deg when open
                     let cx = tx + tw * 0.5;
                     let cy = trail_rect.y + h * 0.5;
-                    let dy = lerp(2.2 * u, -2.2 * u, open_anim);
-                    ui.stroke_line([cx - 4.5 * u, cy - dy], [cx, cy + dy], 1.8 * u, ink);
-                    ui.stroke_line([cx, cy + dy], [cx + 4.5 * u, cy - dy], 1.8 * u, ink);
+                    let dy = lerp(2.4 * u, -2.4 * u, open_anim);
+                    ui.stroke_line([cx - 4.8 * u, cy - dy], [cx, cy + dy], 2.0 * u, ink);
+                    ui.stroke_line([cx, cy + dy], [cx + 4.8 * u, cy - dy], 2.0 * u, ink);
                     self.zone(Action::SplitTrailing(idx), trail_rect, ink);
 
                     sx = tx + tw + 14.0 * u;
                 }
             }
             ComponentId::ButtonGroup => {
-                // Row 1: M3 Expressive Connected Button Group with spring neighbor width squishing!
+                // Row 1: M3 Expressive Connected Button Group with full spring selection & press physics!
                 let labels = ["Day", "Week", "Month", "Year"];
                 let n = labels.len();
                 let gap = 2.0 * u;
-                let base_w = (w - gap * (n as f32 - 1.0)) / n as f32;
+                let avail_w = w - gap * (n as f32 - 1.0);
                 let h = 40.0 * u;
                 let press_amt = self.group_press.x.clamp(0.0, 1.2);
                 let pressed_idx = self.group_pressed_idx;
-                let mut widths = [base_w; 4];
+                let mut weights = [1.0f32; 4];
+                for (i, wt) in weights.iter_mut().enumerate() {
+                    let sel_t = self.group_sel_anim[i].x.clamp(0.0, 1.2);
+                    *wt += 0.14 * sel_t;
+                }
                 if let Some(pi) = pressed_idx {
                     if press_amt > 0.001 {
-                        let delta = base_w * 0.14 * press_amt;
-                        widths[pi] += delta;
-                        match pi {
-                            0 => widths[1] -= delta,
-                            3 => widths[2] -= delta,
-                            _ => {
-                                widths[pi - 1] -= delta * 0.5;
-                                widths[pi + 1] -= delta * 0.5;
-                            }
-                        }
+                        weights[pi] += 0.16 * press_amt;
                     }
                 }
+                let weight_sum: f32 = weights.iter().sum();
                 let mut gx = x;
                 for (i, label) in labels.into_iter().enumerate() {
-                    let sw = widths[i];
-                    let sel = self.group_sel == i;
+                    let sw = avail_w * (weights[i] / weight_sum);
+                    let sel_t = self.group_sel_anim[i].x.clamp(0.0, 1.0);
                     let is_p = self.is_pressed(Action::Group(i));
-                    let fill = if sel {
-                        self.pal.primary
-                    } else {
-                        self.pal.secondary_container
-                    };
-                    let ink = if sel {
-                        self.pal.on_primary
-                    } else {
-                        self.pal.on_secondary_container
-                    };
-                    // Connected ButtonGroup corner specification:
-                    // Selected item becomes a full pill (20dp). Unselected items have 20dp outer corners and 8dp inner corners (4dp when pressed).
-                    let inner = if is_p { 4.0 * u } else { 8.0 * u };
-                    let radii = if sel {
-                        r4(20.0 * u)
-                    } else if i == 0 {
+                    let fill = mix(self.pal.secondary_container, self.pal.primary, sel_t);
+                    let ink = mix(self.pal.on_secondary_container, self.pal.on_primary, sel_t);
+                    let base_inner = if is_p { 4.0 * u } else { 8.0 * u };
+                    let inner = lerp(base_inner, 20.0 * u, sel_t);
+                    let radii = if i == 0 {
                         [20.0 * u, inner, inner, 20.0 * u]
                     } else if i == n - 1 {
                         [inner, 20.0 * u, 20.0 * u, inner]
@@ -2090,17 +2209,24 @@ impl Gallery {
                     self.draw_ripples(ui, rect);
                     let style = ts(M3_LABEL_LARGE, ink, u);
                     let tw = ui.text_width(label, style.px, style.medium, style.tracking_em);
-                    let ic_w = if sel { 20.0 * u } else { 0.0 };
+                    let ic_w = 20.0 * u * sel_t;
                     let tx = gx + (sw - tw - ic_w) * 0.5;
-                    if sel {
-                        icon_c(ui, "check", tx + 7.0 * u, y + h * 0.5, 16.0 * u, ink);
+                    if sel_t > 0.1 {
+                        icon_c(
+                            ui,
+                            "check",
+                            tx + 7.0 * u,
+                            y + h * 0.5,
+                            16.0 * u * sel_t,
+                            with_alpha(ink, sel_t),
+                        );
                     }
                     ui.text(label, tx + ic_w, y + h * 0.5 - style.line_h * 0.5, style);
                     self.zone(Action::Group(i), rect, ink);
                     gx += sw + gap;
                 }
 
-                // Row 2: M3 Expressive Standard Multi-Select Formatting ButtonGroup
+                // Row 2: M3 Expressive Standard Multi-Select ButtonGroup with spring morph
                 let icons = [
                     ("format_bold", "Bold"),
                     ("format_italic", "Italic"),
@@ -2110,21 +2236,15 @@ impl Gallery {
                 let ry = y + 52.0 * u;
                 let mut sx = x;
                 for (i, (ic, lb)) in icons.into_iter().enumerate() {
-                    let sel = self.std_group_sel[i];
-                    let fill = if sel {
-                        self.pal.tertiary_container
-                    } else {
-                        self.pal.card_hi
-                    };
-                    let ink = if sel {
-                        self.pal.on_tertiary_container
-                    } else {
-                        self.pal.text
-                    };
-                    let r = if sel { 12.0 * u } else { 20.0 * u };
+                    let sel_t = self.std_group_anim[i].x.clamp(0.0, 1.0);
+                    let is_p = self.is_pressed(Action::StdGroup(i));
+                    let fill = mix(self.pal.card_hi, self.pal.tertiary_container, sel_t);
+                    let ink = mix(self.pal.text, self.pal.on_tertiary_container, sel_t);
+                    let base_r = lerp(20.0 * u, 12.0 * u, sel_t);
+                    let r = if is_p { 8.0 * u } else { base_r };
                     let style = ts(M3_LABEL_MEDIUM, ink, u);
                     let tw = ui.text_width(lb, style.px, style.medium, style.tracking_em);
-                    let bw = 14.0 * u + 20.0 * u + tw + 14.0 * u;
+                    let bw = 14.0 * u + 20.0 * u + tw + 14.0 * u + 6.0 * u * sel_t;
                     let rect = Rect {
                         x: sx,
                         y: ry,
@@ -2134,14 +2254,25 @@ impl Gallery {
                     ui.rect(sx, ry, bw, 40.0 * u, fill, r4(r));
                     self.layer(ui, Action::StdGroup(i), rect, r, ink);
                     self.draw_ripples(ui, rect);
-                    icon_c(ui, ic, sx + 20.0 * u, ry + 20.0 * u, 18.0 * u, ink);
-                    ui.text(lb, sx + 34.0 * u, ry + 20.0 * u - style.line_h * 0.5, style);
+                    icon_c(
+                        ui,
+                        ic,
+                        sx + 20.0 * u + 3.0 * u * sel_t,
+                        ry + 20.0 * u,
+                        18.0 * u,
+                        ink,
+                    );
+                    ui.text(
+                        lb,
+                        sx + 34.0 * u + 3.0 * u * sel_t,
+                        ry + 20.0 * u - style.line_h * 0.5,
+                        style,
+                    );
                     self.zone(Action::StdGroup(i), rect, ink);
                     sx += bw + 6.0 * u;
                 }
             }
             ComponentId::Card => {
-                // Show all 3 M3 Card variants side-by-side: Elevated, Filled, Outlined with M3Shape artwork
                 let gap = 10.0 * u;
                 let cw = (w - gap * 2.0) / 3.0;
                 let ch = 172.0 * u;
@@ -2200,7 +2331,6 @@ impl Gallery {
                         r4(16.0 * u),
                         0.0,
                     );
-                    // Media header banner inside card with M3Shape
                     ui.push_clip([cx, y, cw, ch]);
                     ui.rect(
                         cx,
@@ -2255,13 +2385,9 @@ impl Gallery {
                 }
             }
             ComponentId::Checkbox => {
-                let labels = [
-                    "Checked (Expressive stroke)",
-                    "Unchecked",
-                    "Indeterminate parent",
-                ];
-                for (i, label) in labels.into_iter().enumerate() {
-                    self.draw_checkbox(ui, i, x, y + i as f32 * 40.0 * u, label);
+                let titles = ["Notifications", "Auto-sync", "Select all"];
+                for (i, title) in titles.into_iter().enumerate() {
+                    self.draw_checkbox(ui, i, x, y + i as f32 * 40.0 * u, title);
                 }
             }
             ComponentId::Switch => {
@@ -2285,8 +2411,6 @@ impl Gallery {
                 }
             }
             ComponentId::Slider => {
-                // Row 1: M3 Expressive Standard Slider (16dp tall track, [8, 2, 2, 8] / [2, 8, 8, 2] corners,
-                // 6dp gap around 4x44dp handle, leading volume icon, step ticks & stop indicator)
                 let pct = format!("{}%", (self.slider * 100.0).round() as i32);
                 ui.text(
                     "Standard Expressive Slider",
@@ -2310,7 +2434,6 @@ impl Gallery {
                 let tx = x + tw * 0.5 + (bw - tw) * self.slider;
                 let gap = 6.0 * u;
                 let aw = (tx - gap - x).max(0.0);
-                // Active track with outer 8dp, inner 2dp corners
                 if aw > 2.0 * u {
                     ui.rect(
                         x,
@@ -2331,7 +2454,6 @@ impl Gallery {
                         );
                     }
                 }
-                // Inactive track with inner 2dp, outer 8dp corners
                 let ix = (tx + gap).min(x + bw);
                 let iw = (x + bw - ix).max(0.0);
                 if iw > 2.0 * u {
@@ -2344,12 +2466,10 @@ impl Gallery {
                         [2.0 * u, 8.0 * u, 8.0 * u, 2.0 * u],
                     );
                 }
-                // Stop indicator at trailing end
                 let sx = x + bw - 6.0 * u;
                 if sx > tx + gap + 2.0 * u {
                     ui.circle(sx, ty, 2.0 * u, self.pal.primary);
                 }
-                // Vertical 4x44dp handle pill
                 ui.rect(
                     tx - tw * 0.5,
                     ty - 22.0 * u,
@@ -2359,7 +2479,6 @@ impl Gallery {
                     r4(tw * 0.5),
                 );
 
-                // Row 2: M3 Expressive Wavy Slider (real GPU sinusoidal wave active track)
                 ui.text(
                     "Wavy Expressive Slider (GPU Sinusoidal Wave)",
                     x,
@@ -2373,7 +2492,7 @@ impl Gallery {
                         x + aw,
                         wty,
                         4.0 * u,
-                        3.2 * u,
+                        3.0 * u,
                         28.0 * u,
                         -self.t * 5.0,
                         self.pal.primary,
@@ -2416,7 +2535,7 @@ impl Gallery {
                 // 1. Determinate LinearWavyProgressIndicator (follows slider)
                 let p = self.slider.clamp(0.0, 1.0);
                 let stroke_w = 4.0 * u;
-                let gap = 4.0 * u;
+                let visual_gap = 8.0 * u; // gap (4dp) + stroke (4dp) per M3ELinearProgressPainter._visualGap
                 let phase = -self.t * 7.5;
                 let y1 = y + 8.0 * u;
                 let active_w = w * p;
@@ -2433,7 +2552,7 @@ impl Gallery {
                         self.pal.primary,
                     );
                 }
-                let track_x = (x + active_w + gap).min(x + w);
+                let track_x = (x + active_w + visual_gap).min(x + w);
                 let track_w = (x + w - track_x).max(0.0);
                 if track_w > 1.0 * u {
                     ui.rect(
@@ -2447,41 +2566,85 @@ impl Gallery {
                     ui.circle(x + w - stroke_w * 0.5, y1, stroke_w * 0.5, self.pal.primary);
                 }
 
-                // 2. Indeterminate LinearWavyProgressIndicator (2-segment cubic-bezier animation)
+                // 2. Indeterminate LinearWavyProgressIndicator (exact port of M3ELinearProgressPainter._paintWavyIndeterminate!)
                 let y2 = y + 32.0 * u;
-                let cycle = (self.t / 1.8).fract();
-                let l1_head = cubic_bezier_y((cycle / 0.65).clamp(0.0, 1.0), 0.3, 0.0, 0.8, 0.15);
-                let l1_tail =
-                    cubic_bezier_y(((cycle - 0.18) / 0.65).clamp(0.0, 1.0), 0.05, 0.7, 0.1, 1.0);
-                let seg_s = x + w * l1_tail;
-                let seg_e = x + w * l1_head;
-                if seg_s - gap > x + 2.0 * u {
+                let total_ms = 1750.0;
+                let t_cycle = ((self.t * 1000.0) % total_ms) / total_ms;
+                let first_head = eval_indet_segment(t_cycle, 0.0, 1000.0, total_ms);
+                let first_tail = eval_indet_segment(t_cycle, 250.0, 1000.0, total_ms);
+                let second_head = eval_indet_segment(t_cycle, 650.0, 850.0, total_ms);
+                let second_tail = eval_indet_segment(t_cycle, 900.0, 850.0, total_ms);
+
+                // Track segment 1: before secondTail
+                let t1_end = x + second_tail * w - visual_gap;
+                if t1_end > x + 2.0 * u {
                     ui.rect(
                         x,
                         y2 - stroke_w * 0.5,
-                        seg_s - gap - x,
+                        t1_end - x,
                         stroke_w,
                         self.pal.secondary_container,
                         r4(stroke_w * 0.5),
                     );
                 }
-                if seg_e > seg_s + 2.0 * u {
+                // Active wave segment 2: secondTail .. secondHead
+                if second_head > second_tail + 0.01 {
                     ui.wavy_line(
-                        seg_s,
-                        seg_e,
+                        x + second_tail * w,
+                        x + second_head * w,
                         y2,
                         stroke_w,
                         3.0 * u,
                         20.0 * u,
-                        phase * 1.2,
+                        phase * 1.15,
                         self.pal.primary,
                     );
                 }
-                if x + w > seg_e + gap + 2.0 * u {
+                // Track segment 2: between secondHead and firstTail
+                let t2_start = if second_head > 0.0 {
+                    x + second_head * w + visual_gap
+                } else {
+                    x
+                };
+                let t2_end = if first_tail < 1.0 {
+                    x + first_tail * w - visual_gap
+                } else {
+                    x + w
+                };
+                if t2_end > t2_start + 2.0 * u {
                     ui.rect(
-                        seg_e + gap,
+                        t2_start,
                         y2 - stroke_w * 0.5,
-                        x + w - (seg_e + gap),
+                        t2_end - t2_start,
+                        stroke_w,
+                        self.pal.secondary_container,
+                        r4(stroke_w * 0.5),
+                    );
+                }
+                // Active wave segment 1: firstTail .. firstHead
+                if first_head > first_tail + 0.01 {
+                    ui.wavy_line(
+                        x + first_tail * w,
+                        x + first_head * w,
+                        y2,
+                        stroke_w,
+                        3.0 * u,
+                        20.0 * u,
+                        phase * 1.15,
+                        self.pal.primary,
+                    );
+                }
+                // Track segment 3: after firstHead
+                let t3_start = if first_head > 0.0 {
+                    x + first_head * w + visual_gap
+                } else {
+                    x
+                };
+                if x + w > t3_start + 2.0 * u {
+                    ui.rect(
+                        t3_start,
+                        y2 - stroke_w * 0.5,
+                        x + w - t3_start,
                         stroke_w,
                         self.pal.secondary_container,
                         r4(stroke_w * 0.5),
@@ -2513,11 +2676,11 @@ impl Gallery {
                 }
 
                 // 4. Four Circular Indicators (Flat Det, Flat Indet, Wavy Det, Wavy Indet)
-                let cy = y + 114.0 * u;
+                let cy = y + 116.0 * u;
                 let r = 24.0 * u;
                 let step_x = (w / 4.0).min(96.0 * u);
-                let ind_start = (self.t * 220.0) % 360.0;
-                let ind_sweep = 60.0 + 210.0 * ((self.t * 2.4).sin() * 0.5 + 0.5);
+                let ind_start = (self.t * 180.0) % 360.0;
+                let ind_sweep = 55.0 + 215.0 * ((self.t * 2.2).sin() * 0.5 + 0.5);
 
                 let c_specs = [
                     (0, -90.0, p * 360.0, false, "Flat Det"),
@@ -2538,11 +2701,7 @@ impl Gallery {
                 }
             }
             ComponentId::LoadingIndicator => {
-                // Authentic M3 Expressive LoadingIndicator & ContainedLoadingIndicator
-                // cycling through SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval
                 let cy = y + 30.0 * u;
-
-                // 1. Default Uncontained LoadingIndicator (38dp)
                 let (sa0, sb0, mt0, rot0, sc0) = loading_morph_state(self.t, 0);
                 ui.m3_shape_morph(
                     x + 30.0 * u,
@@ -2557,7 +2716,6 @@ impl Gallery {
                     0.0,
                 );
 
-                // 2. ContainedLoadingIndicator (48dp primary_container circle + 34dp on_primary_container morph)
                 let (sa1, sb1, mt1, rot1, sc1) = loading_morph_state(self.t, 2);
                 ui.circle(x + 98.0 * u, cy, 24.0 * u, self.pal.primary_container);
                 ui.m3_shape_morph(
@@ -2573,7 +2731,6 @@ impl Gallery {
                     0.0,
                 );
 
-                // 3. Expressive Secondary ContainedLoadingIndicator (54dp SoftBurst container + 36dp morph)
                 let (sa2, sb2, mt2, rot2, sc2) = loading_morph_state(self.t, 4);
                 ui.m3_shape(
                     x + 170.0 * u,
@@ -2611,7 +2768,6 @@ impl Gallery {
                     ts(M3_BODY_SMALL, self.pal.sub, u),
                 );
 
-                // Bottom row: Showcase strip of 8 distinct M3 Expressive MaterialShapes rendered via GPU SDF
                 let showcase = [
                     (MaterialShape::Sunny, "Sunny"),
                     (MaterialShape::Cookie9Sided, "Cookie9"),
@@ -2719,7 +2875,6 @@ impl Gallery {
                     r4(28.0 * u),
                     0.0,
                 );
-                // M3 Expressive SoftBurst badge behind dialog hero icon
                 ui.m3_shape(
                     dx + dw * 0.5,
                     y + 34.0 * u,
@@ -2796,7 +2951,6 @@ impl Gallery {
                     self.pal.card_hi,
                     [28.0 * u, 28.0 * u, 12.0 * u, 12.0 * u],
                 );
-                // Drag handle (32x4dp)
                 ui.rect(
                     x + w * 0.5 - 16.0 * u,
                     y + 12.0 * u,
@@ -2847,6 +3001,16 @@ impl Gallery {
                 ];
                 let cw = w / items.len() as f32;
                 ui.rect(x, y, w, 80.0 * u, self.pal.card_hi, r4(16.0 * u));
+                // Smoothly spring-animated active pill indicator
+                let pill_cx = x + (self.nav_pos.x + 0.5) * cw;
+                ui.rect(
+                    pill_cx - 32.0 * u,
+                    y + 12.0 * u,
+                    64.0 * u,
+                    32.0 * u,
+                    self.pal.secondary_container,
+                    r4(16.0 * u),
+                );
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let cx0 = x + i as f32 * cw;
                     let sel = self.nav == i;
@@ -2855,16 +3019,6 @@ impl Gallery {
                     } else {
                         self.pal.sub
                     };
-                    if sel {
-                        ui.rect(
-                            cx0 + cw * 0.5 - 32.0 * u,
-                            y + 12.0 * u,
-                            64.0 * u,
-                            32.0 * u,
-                            self.pal.secondary_container,
-                            r4(16.0 * u),
-                        );
-                    }
                     let rect = Rect {
                         x: cx0,
                         y,
@@ -2898,6 +3052,15 @@ impl Gallery {
                     ("bookmark", "Saved"),
                     ("person", "Profile"),
                 ];
+                let pill_y = y + 8.0 * u + self.rail_pos.x * 54.0 * u + 4.0 * u;
+                ui.rect(
+                    x + 16.0 * u,
+                    pill_y,
+                    56.0 * u,
+                    32.0 * u,
+                    self.pal.secondary_container,
+                    r4(16.0 * u),
+                );
                 for (i, (ic, lb)) in items.into_iter().enumerate() {
                     let iy = y + 8.0 * u + i as f32 * 54.0 * u;
                     let sel = self.rail == i;
@@ -2906,16 +3069,6 @@ impl Gallery {
                     } else {
                         self.pal.sub
                     };
-                    if sel {
-                        ui.rect(
-                            x + 16.0 * u,
-                            iy + 4.0 * u,
-                            56.0 * u,
-                            32.0 * u,
-                            self.pal.secondary_container,
-                            r4(16.0 * u),
-                        );
-                    }
                     let rect = Rect {
                         x: x + 4.0 * u,
                         y: iy,
@@ -2933,7 +3086,6 @@ impl Gallery {
                     text_c(ui, lb, x + 44.0 * u, iy + 36.0 * u, style);
                     self.zone(Action::Rail(i), rect, ink);
                 }
-                // Content preview pane next to rail
                 let px = x + 100.0 * u;
                 let pw = (w - 100.0 * u).max(80.0 * u);
                 ui.rect(px, y, pw, 232.0 * u, self.pal.card_hi, r4(16.0 * u));
@@ -2965,6 +3117,15 @@ impl Gallery {
                     ("favorite", "Favorites", "5"),
                     ("delete", "Trash", ""),
                 ];
+                let pill_y = y + 52.0 * u + self.drawer_pos.x * 56.0 * u;
+                ui.rect(
+                    x + 12.0 * u,
+                    pill_y,
+                    dw - 24.0 * u,
+                    52.0 * u,
+                    self.pal.secondary_container,
+                    r4(26.0 * u),
+                );
                 for (i, (ic, lb, badge)) in items.into_iter().enumerate() {
                     let iy = y + 52.0 * u + i as f32 * 56.0 * u;
                     let sel = self.drawer == i;
@@ -2979,16 +3140,6 @@ impl Gallery {
                         w: dw - 24.0 * u,
                         h: 52.0 * u,
                     };
-                    if sel {
-                        ui.rect(
-                            rect.x,
-                            rect.y,
-                            rect.w,
-                            rect.h,
-                            self.pal.secondary_container,
-                            r4(26.0 * u),
-                        );
-                    }
                     self.layer(ui, Action::Drawer(i), rect, 26.0 * u, self.pal.text);
                     self.draw_ripples(ui, rect);
                     icon_c(ui, ic, x + 32.0 * u, iy + 26.0 * u, 22.0 * u, ink);
@@ -3086,7 +3237,6 @@ impl Gallery {
                 ui.pop_clip();
             }
             ComponentId::TopAppBar => {
-                // MediumFlexibleTopAppBar with subtitle and tonal actions
                 ui.rect(x, y, w, 100.0 * u, self.pal.card_hi, r4(16.0 * u));
                 self.icon_button(
                     ui,
@@ -3159,7 +3309,6 @@ impl Gallery {
                     y + 16.0 * u,
                     ts(M3_BODY_LARGE, self.pal.sub, u),
                 );
-                // Trailing Clover4Leaf avatar + mic icon
                 icon_c(
                     ui,
                     "mic",
@@ -3189,7 +3338,6 @@ impl Gallery {
                 self.zone(a, rect, self.pal.text);
             }
             ComponentId::TextField => {
-                // 1. Filled TextField
                 let f = self.focus.x.clamp(0.0, 1.0);
                 ui.rect(
                     x,
@@ -3229,13 +3377,11 @@ impl Gallery {
                     r4(0.0),
                 );
 
-                // 2. OutlinedTextField with genuine floating-label cutout on the top border
                 let oy = y + 80.0 * u;
                 ui.stroke(x, oy, w, 56.0 * u, self.pal.primary, r4(4.0 * u), 1.5 * u);
                 let lbl = "Password";
                 let lbl_style = ts(M3_BODY_SMALL, self.pal.primary, u);
                 let ltw = ui.text_width(lbl, lbl_style.px, lbl_style.medium, lbl_style.tracking_em);
-                // Cutout mask over the top border so the border never slices through the label
                 ui.rect(
                     x + 12.0 * u,
                     oy - 4.0 * u,
@@ -3269,7 +3415,6 @@ impl Gallery {
                 );
             }
             ComponentId::Menu => {
-                // M3 Expressive DropdownMenuPopup with grouped rounded sections (16dp outer, 4dp inner, 6dp group gap)
                 let mw = (260.0 * u).min(w);
                 let items = [
                     ("edit", "Rename file", "Ctrl+R"),
@@ -3292,7 +3437,6 @@ impl Gallery {
                     } else {
                         self.pal.text
                     };
-                    // Group 1 = items 0..=2, Group 2 = item 3 (destructive)
                     let radii = match i {
                         0 => [16.0 * u, 16.0 * u, 4.0 * u, 4.0 * u],
                         1 => r4(4.0 * u),
@@ -3322,8 +3466,6 @@ impl Gallery {
                 }
             }
             ComponentId::Carousel => {
-                // Authentic M3 Expressive Carousel (Compose CarouselSamples.kt port):
-                // 1. Mode selector pills: Multi-browse | Centered hero | Uncontained
                 let modes = ["Multi-browse", "Centered hero", "Uncontained"];
                 let mut mx = x;
                 for (m, label) in modes.into_iter().enumerate() {
@@ -3349,12 +3491,12 @@ impl Gallery {
                     };
                     ui.rect(mx, y, mw, 28.0 * u, fill, r4(14.0 * u));
                     self.layer(ui, Action::CarouselMode(m), m_rect, 14.0 * u, ink);
+                    self.draw_ripples(ui, m_rect);
                     ui.text(label, mx + 12.0 * u, y + 6.0 * u, st);
                     self.zone(Action::CarouselMode(m), m_rect, ink);
                     mx += mw + 8.0 * u;
                 }
 
-                // 2. Carousel Track (Uniform 176dp height, 28dp corner radius, dynamic width squishing!)
                 let cy = y + 38.0 * u;
                 let ch = 176.0 * u;
                 let gap = 8.0 * u;
@@ -3405,13 +3547,11 @@ impl Gallery {
                 let n = items.len();
                 let focus = self.carousel_pos.x.clamp(0.0, (n - 1) as f32);
 
-                // Compute dynamic M3E item widths based on mode & continuous spring focus
                 let mut raw_weights = [0.0f32; 5];
                 for (i, slot) in raw_weights.iter_mut().enumerate() {
                     let dist = (i as f32 - focus).abs();
                     *slot = match self.carousel_mode {
                         0 => {
-                            // HorizontalMultiBrowseCarousel: Large -> Medium -> Small -> Peek
                             if dist < 1.0 {
                                 lerp(4.2, 2.2, dist)
                             } else if dist < 2.0 {
@@ -3421,7 +3561,6 @@ impl Gallery {
                             }
                         }
                         1 => {
-                            // HorizontalCenteredHeroCarousel: Small | HERO | Small
                             if dist < 1.0 {
                                 lerp(4.6, 1.05, dist)
                             } else {
@@ -3429,7 +3568,6 @@ impl Gallery {
                             }
                         }
                         _ => {
-                            // HorizontalUncontainedCarousel: larger uniform cards with trailing peek
                             if dist < 1.5 {
                                 lerp(3.2, 2.6, dist / 1.5)
                             } else {
@@ -3445,7 +3583,6 @@ impl Gallery {
                     items.into_iter().enumerate()
                 {
                     let cw = avail_w * (raw_weights[i] / weight_sum);
-                    // 28dp corner radius (MaterialTheme.shapes.extraLarge), clamped to cw * 0.5 for narrow peek pills
                     let r = (28.0 * u).min(cw * 0.5);
                     let card_rect = Rect {
                         x: cx0,
@@ -3454,13 +3591,12 @@ impl Gallery {
                         h: ch,
                     };
 
-                    // Base card fill
                     ui.rect(cx0, cy, cw, ch, bg_col, r4(r));
+                    // Draw state layer and ripples BEFORE text/icons so card text never vanishes on press
+                    self.layer(ui, Action::CarouselPage(i), card_rect, r, self.pal.text);
+                    self.draw_ripples(ui, card_rect);
 
-                    // Clip all rich artwork and labels cleanly inside the card bounds
                     ui.push_clip([cx0, cy, cw, ch]);
-
-                    // Decorative M3 Expressive shape artwork in upper right of card
                     ui.m3_shape(
                         cx0 + cw * 0.68,
                         cy + ch * 0.36,
@@ -3471,15 +3607,12 @@ impl Gallery {
                         with_alpha(accent_col, 0.45),
                         1.5 * u,
                     );
-                    // Secondary ambient circle/pill accent
                     ui.circle(
                         cx0 + cw * 0.22,
                         cy + ch * 0.24,
                         28.0 * u,
                         with_alpha(accent_col, 0.14),
                     );
-
-                    // Bottom gradient-like scrim for high-contrast typography
                     ui.rect(
                         cx0,
                         cy + ch - 68.0 * u,
@@ -3488,8 +3621,6 @@ impl Gallery {
                         with_alpha(self.pal.bg, 0.62),
                         [0.0, 0.0, r, r],
                     );
-
-                    // Top-left icon pill badge
                     ui.circle(
                         cx0 + (24.0 * u).min(cw * 0.5),
                         cy + 24.0 * u,
@@ -3505,7 +3636,6 @@ impl Gallery {
                         accent_col,
                     );
 
-                    // Reveal title & subtitle smoothly when the card is wide enough
                     let text_alpha = ((cw - 76.0 * u) / (44.0 * u)).clamp(0.0, 1.0);
                     if text_alpha > 0.05 {
                         ui.text(
@@ -3521,10 +3651,8 @@ impl Gallery {
                             ts(M3_BODY_SMALL, with_alpha(accent_col, text_alpha), u),
                         );
                     }
-
                     ui.pop_clip();
 
-                    // Crisp 1dp outline border around the 28dp card
                     ui.stroke(
                         cx0,
                         cy,
@@ -3534,54 +3662,116 @@ impl Gallery {
                         r4(r),
                         1.0 * u,
                     );
-
-                    self.layer(ui, Action::CarouselPage(i), card_rect, r, self.pal.text);
-                    self.draw_ripples(ui, card_rect);
                     self.zone(Action::CarouselPage(i), card_rect, self.pal.text);
                     cx0 += cw + gap;
                 }
             }
             ComponentId::DatePicker => {
+                // Authentic M3EDatePickerDialog portrait layout (M3EDatePickerHeader + HorizontalDivider + M3ECalendarDatePicker + Actions)
+                let dw = (348.0 * u).min(w);
+                let dx = x + (w - dw) * 0.5;
+                let dh = 440.0 * u;
+                ui.rect_styled(
+                    dx,
+                    y,
+                    dw,
+                    dh,
+                    self.pal.card_hi,
+                    self.pal.outline_variant,
+                    1.0 * u,
+                    r4(28.0 * u),
+                    0.0,
+                );
+
+                // 1. M3EDatePickerHeader (height = 96dp)
                 ui.text(
-                    "Select date • Oct 2026",
-                    x + 12.0 * u,
-                    y + 6.0 * u,
-                    ts(M3_TITLE_MEDIUM, self.pal.text, u),
+                    "Select date",
+                    dx + 24.0 * u,
+                    y + 16.0 * u,
+                    ts(M3_LABEL_MEDIUM, self.pal.sub, u),
+                );
+                let weekdays = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+                let wd_name = weekdays[self.date_day % 7];
+                let headline = format!("{wd_name}, Oct {}", self.date_day + 1);
+                ui.text(
+                    &headline,
+                    dx + 24.0 * u,
+                    y + 44.0 * u,
+                    ts(M3_HEADLINE_MEDIUM, self.pal.text, u),
+                );
+                self.icon_button(
+                    ui,
+                    130,
+                    dx + dw - 52.0 * u,
+                    y + 40.0 * u,
+                    "edit",
+                    IconBtn::Standard,
+                );
+
+                // Full-bleed HorizontalDivider below header
+                ui.rect(
+                    dx,
+                    y + 92.0 * u,
+                    dw,
+                    1.0 * u,
+                    self.pal.outline_variant,
+                    r4(0.0),
+                );
+
+                // 2. Sub-header: Month/Year mode toggle + Prev/Next month chevrons
+                let sub_y = y + 100.0 * u;
+                let month_lbl = "October 2026";
+                let m_style = ts(M3_LABEL_LARGE, self.pal.sub, u);
+                let m_tw =
+                    ui.text_width(month_lbl, m_style.px, m_style.medium, m_style.tracking_em);
+                ui.text(month_lbl, dx + 20.0 * u, sub_y + 10.0 * u, m_style);
+                icon_c(
+                    ui,
+                    "expand_more",
+                    dx + 28.0 * u + m_tw,
+                    sub_y + 20.0 * u,
+                    18.0 * u,
+                    self.pal.sub,
                 );
                 icon_c(
                     ui,
                     "arrow_back",
-                    x + w - 64.0 * u,
-                    y + 18.0 * u,
+                    dx + dw - 68.0 * u,
+                    sub_y + 20.0 * u,
                     20.0 * u,
                     self.pal.sub,
                 );
                 icon_c(
                     ui,
                     "arrow_forward",
-                    x + w - 28.0 * u,
-                    y + 18.0 * u,
+                    dx + dw - 28.0 * u,
+                    sub_y + 20.0 * u,
                     20.0 * u,
                     self.pal.sub,
                 );
-                let cw = (w / 7.0).min(46.0 * u);
-                let x0 = x + (w - 7.0 * cw) * 0.5;
+
+                // 3. Narrow weekday header row
+                let cw = (dw - 24.0 * u) / 7.0;
+                let x0 = dx + 12.0 * u;
                 let wd = ["S", "M", "T", "W", "T", "F", "S"];
                 for (i, d) in wd.into_iter().enumerate() {
                     text_c(
                         ui,
                         d,
-                        x0 + i as f32 * cw + cw * 0.5,
-                        y + 40.0 * u,
-                        ts(M3_LABEL_MEDIUM, self.pal.sub, u),
+                        x0 + (i as f32 + 0.5) * cw,
+                        y + 144.0 * u,
+                        ts(M3_BODY_SMALL, self.pal.sub, u),
                     );
                 }
+
+                // 4. Day Grid (5 rows x 40dp)
+                let sel_scale = self.date_anim.x.clamp(0.0, 1.15);
                 for day in 0..31 {
-                    let slot = day + 4; // Oct 1, 2026 starts on Thursday (index 4)
+                    let slot = day + 4; // Oct 1, 2026 = Thursday
                     let col = slot % 7;
                     let row = slot / 7;
-                    let gx = x0 + col as f32 * cw + cw * 0.5;
-                    let gy = y + 68.0 * u + row as f32 * 40.0 * u + 20.0 * u;
+                    let gx = x0 + (col as f32 + 0.5) * cw;
+                    let gy = y + 172.0 * u + row as f32 * 40.0 * u + 20.0 * u;
                     let sel = day == self.date_day;
                     let today = day == 15;
                     let hit = Rect {
@@ -3591,7 +3781,7 @@ impl Gallery {
                         h: 36.0 * u,
                     };
                     if sel {
-                        ui.circle(gx, gy, 18.0 * u, self.pal.primary);
+                        ui.circle(gx, gy, 18.0 * u * sel_scale, self.pal.primary);
                     } else if today {
                         ui.stroke(
                             hit.x,
@@ -3603,6 +3793,8 @@ impl Gallery {
                             1.2 * u,
                         );
                     }
+                    self.layer_circle(ui, Action::DateDay(day), gx, gy, 18.0 * u, self.pal.primary);
+                    self.draw_ripples(ui, hit);
                     let label = format!("{}", day + 1);
                     text_c(
                         ui,
@@ -3610,7 +3802,7 @@ impl Gallery {
                         gx,
                         gy - 10.0 * u,
                         ts(
-                            M3_LABEL_LARGE,
+                            M3_BODY_MEDIUM,
                             if sel {
                                 self.pal.on_primary
                             } else if today {
@@ -3623,91 +3815,234 @@ impl Gallery {
                     );
                     self.zone(Action::DateDay(day), hit, self.pal.primary);
                 }
+
+                // 5. Dialog Actions Row (Cancel / OK)
+                let act_y = y + 388.0 * u;
+                let st = ts(M3_LABEL_LARGE, self.pal.primary, u);
+                let wc = 24.0 * u + ui.text_width("Cancel", st.px, st.medium, st.tracking_em);
+                let wok = 24.0 * u + ui.text_width("OK", st.px, st.medium, st.tracking_em);
+                self.draw_button(
+                    ui,
+                    131,
+                    dx + dw - wc - wok - 28.0 * u,
+                    act_y,
+                    BtnSpec {
+                        label: "Cancel",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
+                self.draw_button(
+                    ui,
+                    132,
+                    dx + dw - wok - 16.0 * u,
+                    act_y,
+                    BtnSpec {
+                        label: "OK",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
             }
             ComponentId::TimePicker => {
-                // Left side: M3 Digital Time Input boxes (10 : 24 + AM/PM toggle)
-                ui.text("Select time", x, y, ts(M3_LABEL_MEDIUM, self.pal.sub, u));
-                // Hour box (selected)
-                ui.rect(
-                    x,
-                    y + 24.0 * u,
-                    68.0 * u,
-                    56.0 * u,
-                    self.pal.primary_container,
-                    r4(12.0 * u),
-                );
-                ui.stroke(
-                    x,
-                    y + 24.0 * u,
-                    68.0 * u,
-                    56.0 * u,
-                    self.pal.primary,
-                    r4(12.0 * u),
-                    2.0 * u,
-                );
-                text_c(
-                    ui,
-                    "10",
-                    x + 34.0 * u,
-                    y + 30.0 * u,
-                    ts(M3_DISPLAY_SMALL, self.pal.on_primary_container, u),
-                );
-                text_c(
-                    ui,
-                    ":",
-                    x + 76.0 * u,
-                    y + 28.0 * u,
-                    ts(M3_DISPLAY_SMALL, self.pal.text, u),
-                );
-                // Minute box
-                ui.rect(
-                    x + 84.0 * u,
-                    y + 24.0 * u,
-                    68.0 * u,
-                    56.0 * u,
-                    self.pal.card_highest,
-                    r4(12.0 * u),
-                );
-                text_c(
-                    ui,
-                    "24",
-                    x + 118.0 * u,
-                    y + 30.0 * u,
-                    ts(M3_DISPLAY_SMALL, self.pal.text, u),
+                // Authentic M3ETimePickerDialog portrait layout (M3EDialTimePicker + M3EDayPeriodControl + M3ETimeDialPainter):
+                let dw = (328.0 * u).min(w);
+                let dx = x + (w - dw) * 0.5;
+                let dh = 432.0 * u;
+                ui.rect_styled(
+                    dx,
+                    y,
+                    dw,
+                    dh,
+                    self.pal.card_hi,
+                    self.pal.outline_variant,
+                    1.0 * u,
+                    r4(28.0 * u),
+                    0.0,
                 );
 
-                // Interactive AM / PM segmented toggle
+                // 1. Header help label
+                ui.text(
+                    "Select time",
+                    dx + 24.0 * u,
+                    y + 18.0 * u,
+                    ts(M3_LABEL_MEDIUM, self.pal.sub, u),
+                );
+
+                // 2. Portrait Fields + Stacked AM/PM Period Control Row
+                let fy = y + 44.0 * u;
+                let fh = 72.0 * u;
+                let fw = 88.0 * u;
+                let fields_x = dx + (dw - (fw * 2.0 + 24.0 * u + 12.0 * u + 52.0 * u)) * 0.5;
+
+                // Hour field
+                let h_active = !self.time_minute_mode;
+                let h_rect = Rect {
+                    x: fields_x,
+                    y: fy,
+                    w: fw,
+                    h: fh,
+                };
+                ui.rect_styled(
+                    h_rect.x,
+                    h_rect.y,
+                    h_rect.w,
+                    h_rect.h,
+                    if h_active {
+                        self.pal.primary_container
+                    } else {
+                        self.pal.card_highest
+                    },
+                    if h_active { self.pal.primary } else { [0.0; 4] },
+                    if h_active { 2.0 * u } else { 0.0 },
+                    r4(8.0 * u),
+                    0.0,
+                );
+                self.layer(
+                    ui,
+                    Action::TimeFieldMode(false),
+                    h_rect,
+                    8.0 * u,
+                    self.pal.text,
+                );
+                self.draw_ripples(ui, h_rect);
+                let disp_hour = if self.time_hour_idx == 0 {
+                    12
+                } else {
+                    self.time_hour_idx
+                };
+                let h_str = format!("{disp_hour:02}");
+                text_c(
+                    ui,
+                    &h_str,
+                    h_rect.x + fw * 0.5,
+                    fy + 14.0 * u,
+                    ts(
+                        M3_DISPLAY_SMALL,
+                        if h_active {
+                            self.pal.on_primary_container
+                        } else {
+                            self.pal.text
+                        },
+                        u,
+                    ),
+                );
+                self.zone(Action::TimeFieldMode(false), h_rect, self.pal.text);
+
+                // Colon separator (two 3dp dots)
+                let colon_x = fields_x + fw + 12.0 * u;
+                ui.circle(colon_x, fy + 26.0 * u, 3.0 * u, self.pal.text);
+                ui.circle(colon_x, fy + 46.0 * u, 3.0 * u, self.pal.text);
+
+                // Minute field
+                let m_active = self.time_minute_mode;
+                let m_rect = Rect {
+                    x: fields_x + fw + 24.0 * u,
+                    y: fy,
+                    w: fw,
+                    h: fh,
+                };
+                ui.rect_styled(
+                    m_rect.x,
+                    m_rect.y,
+                    m_rect.w,
+                    m_rect.h,
+                    if m_active {
+                        self.pal.primary_container
+                    } else {
+                        self.pal.card_highest
+                    },
+                    if m_active { self.pal.primary } else { [0.0; 4] },
+                    if m_active { 2.0 * u } else { 0.0 },
+                    r4(8.0 * u),
+                    0.0,
+                );
+                self.layer(
+                    ui,
+                    Action::TimeFieldMode(true),
+                    m_rect,
+                    8.0 * u,
+                    self.pal.text,
+                );
+                self.draw_ripples(ui, m_rect);
+                let disp_min = (self.time_min_idx * 5) % 60;
+                let m_str = format!("{disp_min:02}");
+                text_c(
+                    ui,
+                    &m_str,
+                    m_rect.x + fw * 0.5,
+                    fy + 14.0 * u,
+                    ts(
+                        M3_DISPLAY_SMALL,
+                        if m_active {
+                            self.pal.on_primary_container
+                        } else {
+                            self.pal.text
+                        },
+                        u,
+                    ),
+                );
+                self.zone(Action::TimeFieldMode(true), m_rect, self.pal.text);
+
+                // M3EDayPeriodControl: Vertical stacked AM / PM pill (52x72dp, 8dp radius, 1dp outline border)
+                let px = m_rect.x + fw + 12.0 * u;
+                let pw = 52.0 * u;
+                let ph_half = fh * 0.5;
                 let am_rect = Rect {
-                    x,
-                    y: y + 92.0 * u,
-                    w: 74.0 * u,
-                    h: 34.0 * u,
+                    x: px,
+                    y: fy,
+                    w: pw,
+                    h: ph_half,
                 };
                 let pm_rect = Rect {
-                    x: x + 78.0 * u,
-                    y: y + 92.0 * u,
-                    w: 74.0 * u,
-                    h: 34.0 * u,
+                    x: px,
+                    y: fy + ph_half,
+                    w: pw,
+                    h: ph_half,
                 };
+                if self.time_am {
+                    ui.rect(
+                        am_rect.x,
+                        am_rect.y,
+                        am_rect.w,
+                        am_rect.h,
+                        self.pal.tertiary_container,
+                        [8.0 * u, 8.0 * u, 0.0, 0.0],
+                    );
+                } else {
+                    ui.rect(
+                        pm_rect.x,
+                        pm_rect.y,
+                        pm_rect.w,
+                        pm_rect.h,
+                        self.pal.tertiary_container,
+                        [0.0, 0.0, 8.0 * u, 8.0 * u],
+                    );
+                }
+                ui.stroke(px, fy, pw, fh, self.pal.outline, r4(8.0 * u), 1.0 * u);
                 ui.rect(
-                    am_rect.x,
-                    am_rect.y,
-                    am_rect.w,
-                    am_rect.h,
-                    if self.time_am {
-                        self.pal.tertiary_container
-                    } else {
-                        self.pal.card_hi
-                    },
-                    [10.0 * u, 4.0 * u, 4.0 * u, 10.0 * u],
+                    px,
+                    fy + ph_half - 0.5 * u,
+                    pw,
+                    1.0 * u,
+                    self.pal.outline,
+                    r4(0.0),
                 );
+                self.layer_radii(
+                    ui,
+                    Action::TimeAmPm(true),
+                    am_rect,
+                    [8.0 * u, 8.0 * u, 0.0, 0.0],
+                    self.pal.text,
+                );
+                self.draw_ripples(ui, am_rect);
                 text_c(
                     ui,
                     "AM",
-                    am_rect.x + am_rect.w * 0.5,
-                    am_rect.y + 7.0 * u,
+                    px + pw * 0.5,
+                    fy + 8.0 * u,
                     ts(
-                        M3_LABEL_LARGE,
+                        M3_TITLE_SMALL,
                         if self.time_am {
                             self.pal.on_tertiary_container
                         } else {
@@ -3718,25 +4053,21 @@ impl Gallery {
                 );
                 self.zone(Action::TimeAmPm(true), am_rect, self.pal.text);
 
-                ui.rect(
-                    pm_rect.x,
-                    pm_rect.y,
-                    pm_rect.w,
-                    pm_rect.h,
-                    if !self.time_am {
-                        self.pal.tertiary_container
-                    } else {
-                        self.pal.card_hi
-                    },
-                    [4.0 * u, 10.0 * u, 10.0 * u, 4.0 * u],
+                self.layer_radii(
+                    ui,
+                    Action::TimeAmPm(false),
+                    pm_rect,
+                    [0.0, 0.0, 8.0 * u, 8.0 * u],
+                    self.pal.text,
                 );
+                self.draw_ripples(ui, pm_rect);
                 text_c(
                     ui,
                     "PM",
-                    pm_rect.x + pm_rect.w * 0.5,
-                    pm_rect.y + 7.0 * u,
+                    px + pw * 0.5,
+                    fy + ph_half + 8.0 * u,
                     ts(
-                        M3_LABEL_LARGE,
+                        M3_TITLE_SMALL,
                         if !self.time_am {
                             self.pal.on_tertiary_container
                         } else {
@@ -3747,34 +4078,52 @@ impl Gallery {
                 );
                 self.zone(Action::TimeAmPm(false), pm_rect, self.pal.text);
 
-                // Right side: Authentic 12-hour Clock Dial with selector circle on 10
-                let cx = x + (w - 102.0 * u).max(248.0 * u);
-                let cy = y + 104.0 * u;
-                let dial_r = 96.0 * u;
-                ui.circle(cx, cy, dial_r, self.pal.card_highest);
-                let num_r = 72.0 * u;
-                // Selected hour = 10 -> angle = (10 * 30 - 90) deg = 210 deg
-                let sel_ang = 210.0f32.to_radians();
-                let sel_x = cx + num_r * sel_ang.cos();
-                let sel_y = cy + num_r * sel_ang.sin();
-                ui.stroke_line([cx, cy], [sel_x, sel_y], 2.5 * u, self.pal.primary);
-                ui.circle(cx, cy, 4.5 * u, self.pal.primary);
-                ui.circle(sel_x, sel_y, 18.0 * u, self.pal.primary);
+                // 3. M3ETimeDialPainter: 224dp Clock Dial with unbroken spring-animated hand & 20dp knob
+                let dial_cx = dx + dw * 0.5;
+                let dial_cy = y + 248.0 * u;
+                let dial_r = 112.0 * u;
+                let knob_r = 20.0 * u;
+                let ring_r = dial_r - knob_r - 4.0 * u;
+                ui.circle(dial_cx, dial_cy, dial_r, self.pal.card_highest);
 
-                for h_idx in 1..=12 {
-                    let deg = h_idx as f32 * 30.0 - 90.0;
-                    let ang = deg.to_radians();
-                    let nx = cx + num_r * ang.cos();
-                    let ny = cy + num_r * ang.sin();
-                    let lbl = format!("{h_idx}");
+                let hand_ang = self.time_angle.x;
+                let knob_x = dial_cx + ring_r * hand_ang.cos();
+                let knob_y = dial_cy + ring_r * hand_ang.sin();
+                // Unbroken 2dp selection hand line + 4dp center dot + 20dp selector knob
+                ui.stroke_line(
+                    [dial_cx, dial_cy],
+                    [knob_x, knob_y],
+                    2.2 * u,
+                    self.pal.primary,
+                );
+                ui.circle(dial_cx, dial_cy, 4.0 * u, self.pal.primary);
+                ui.circle(knob_x, knob_y, knob_r, self.pal.primary);
+
+                let active_idx = if self.time_minute_mode {
+                    self.time_min_idx
+                } else {
+                    self.time_hour_idx
+                };
+                for idx in 0..12 {
+                    let ang = -FRAC_PI_2 + idx as f32 * (TAU / 12.0);
+                    let nx = dial_cx + ring_r * ang.cos();
+                    let ny = dial_cy + ring_r * ang.sin();
+                    let lbl = if self.time_minute_mode {
+                        format!("{:02}", idx * 5)
+                    } else if idx == 0 {
+                        "12".to_string()
+                    } else {
+                        format!("{idx}")
+                    };
+                    let sel = idx == active_idx;
                     text_c(
                         ui,
                         &lbl,
                         nx,
-                        ny - 10.0 * u,
+                        ny - 11.0 * u,
                         ts(
-                            M3_LABEL_LARGE,
-                            if h_idx == 10 {
+                            M3_BODY_LARGE,
+                            if sel {
                                 self.pal.on_primary
                             } else {
                                 self.pal.text
@@ -3782,10 +4131,52 @@ impl Gallery {
                             u,
                         ),
                     );
+                    let hit = Rect {
+                        x: nx - 18.0 * u,
+                        y: ny - 18.0 * u,
+                        w: 36.0 * u,
+                        h: 36.0 * u,
+                    };
+                    self.zone(Action::TimeDial(idx), hit, self.pal.primary);
                 }
+
+                // 4. Bottom Actions Row (mode icon + Cancel / OK)
+                let act_y = y + 380.0 * u;
+                icon_c(
+                    ui,
+                    "schedule",
+                    dx + 32.0 * u,
+                    act_y + 20.0 * u,
+                    22.0 * u,
+                    self.pal.sub,
+                );
+                let st = ts(M3_LABEL_LARGE, self.pal.primary, u);
+                let wc = 24.0 * u + ui.text_width("Cancel", st.px, st.medium, st.tracking_em);
+                let wok = 24.0 * u + ui.text_width("OK", st.px, st.medium, st.tracking_em);
+                self.draw_button(
+                    ui,
+                    133,
+                    dx + dw - wc - wok - 28.0 * u,
+                    act_y,
+                    BtnSpec {
+                        label: "Cancel",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
+                self.draw_button(
+                    ui,
+                    134,
+                    dx + dw - wok - 16.0 * u,
+                    act_y,
+                    BtnSpec {
+                        label: "OK",
+                        icon: None,
+                        variant: Btn::Text,
+                    },
+                );
             }
             ComponentId::Tooltip => {
-                // PlainTooltip + RichTooltip with action button
                 ui.rect(
                     x + 16.0 * u,
                     y,
@@ -3865,7 +4256,6 @@ impl Gallery {
                 self.zone(a, rect, self.pal.inverse_primary);
             }
             ComponentId::Badge => {
-                // Small 6dp badge + Single-digit 16dp badge + Multi-digit "99+" pill badge
                 ui.rect(
                     x + 4.0 * u,
                     y + 8.0 * u,
@@ -3949,7 +4339,6 @@ impl Gallery {
                 );
             }
             ComponentId::ListItem => {
-                // M3 Expressive Segmented List: 16dp outer corners, 4dp inner corners, 2dp gap, M3Shape avatars
                 let rows = [
                     (
                         MaterialShape::Clover4Leaf,
@@ -4037,7 +4426,7 @@ impl Gallery {
                 }
             }
             ComponentId::Tabs => {
-                // Row 1: PrimaryTabRow (icon + label + 3dp top-rounded active indicator)
+                // Row 1: PrimaryTabRow with spring-animated indicator & layer/ripples BEFORE text!
                 let items = [
                     ("code", "Code"),
                     ("terminal", "Build"),
@@ -4049,24 +4438,6 @@ impl Gallery {
                     let tx = x + i as f32 * tw2;
                     let sel = self.tabs == i;
                     let col = if sel { self.pal.primary } else { self.pal.sub };
-                    icon_c(ui, ic, tx + tw2 * 0.5, y + 18.0 * u, 20.0 * u, col);
-                    text_c(
-                        ui,
-                        lb,
-                        tx + tw2 * 0.5,
-                        y + 34.0 * u,
-                        ts(M3_TITLE_SMALL, col, u),
-                    );
-                    if sel {
-                        ui.rect(
-                            tx + tw2 * 0.5 - 22.0 * u,
-                            y + 57.0 * u,
-                            44.0 * u,
-                            3.0 * u,
-                            self.pal.primary,
-                            [3.0 * u, 3.0 * u, 0.0, 0.0],
-                        );
-                    }
                     let rect = Rect {
                         x: tx,
                         y,
@@ -4075,8 +4446,25 @@ impl Gallery {
                     };
                     self.layer(ui, Action::Tab(i), rect, 8.0 * u, self.pal.text);
                     self.draw_ripples(ui, rect);
+                    icon_c(ui, ic, tx + tw2 * 0.5, y + 18.0 * u, 20.0 * u, col);
+                    text_c(
+                        ui,
+                        lb,
+                        tx + tw2 * 0.5,
+                        y + 34.0 * u,
+                        ts(M3_TITLE_SMALL, col, u),
+                    );
                     self.zone(Action::Tab(i), rect, self.pal.text);
                 }
+                let ind_cx = x + (self.tab_pos.x + 0.5) * tw2;
+                ui.rect(
+                    ind_cx - 24.0 * u,
+                    y + 57.0 * u,
+                    48.0 * u,
+                    3.0 * u,
+                    self.pal.primary,
+                    [3.0 * u, 3.0 * u, 0.0, 0.0],
+                );
                 ui.rect(
                     x,
                     y + 60.0 * u,
@@ -4086,7 +4474,7 @@ impl Gallery {
                     r4(0.0),
                 );
 
-                // Row 2: SecondaryTabRow (text-only with full-width indicator)
+                // Row 2: SecondaryTabRow with spring-animated indicator & layer/ripples BEFORE text!
                 let sec_items = ["Overview", "Specifications", "Guidelines"];
                 let sw = w / 3.0;
                 let sy = y + 70.0 * u;
@@ -4094,23 +4482,6 @@ impl Gallery {
                     let tx = x + i as f32 * sw;
                     let sel = self.sec_tabs == i;
                     let col = if sel { self.pal.text } else { self.pal.sub };
-                    text_c(
-                        ui,
-                        lb,
-                        tx + sw * 0.5,
-                        sy + 12.0 * u,
-                        ts(M3_TITLE_SMALL, col, u),
-                    );
-                    if sel {
-                        ui.rect(
-                            tx,
-                            sy + 42.0 * u,
-                            sw,
-                            2.0 * u,
-                            self.pal.primary,
-                            r4(1.0 * u),
-                        );
-                    }
                     let rect = Rect {
                         x: tx,
                         y: sy,
@@ -4119,8 +4490,24 @@ impl Gallery {
                     };
                     self.layer(ui, Action::SecondaryTab(i), rect, 8.0 * u, self.pal.text);
                     self.draw_ripples(ui, rect);
+                    text_c(
+                        ui,
+                        lb,
+                        tx + sw * 0.5,
+                        sy + 12.0 * u,
+                        ts(M3_TITLE_SMALL, col, u),
+                    );
                     self.zone(Action::SecondaryTab(i), rect, self.pal.text);
                 }
+                let sec_ind_x = x + self.sec_tab_pos.x * sw;
+                ui.rect(
+                    sec_ind_x,
+                    sy + 42.0 * u,
+                    sw,
+                    2.0 * u,
+                    self.pal.primary,
+                    r4(1.0 * u),
+                );
                 ui.rect(
                     x,
                     sy + 44.0 * u,
@@ -4131,25 +4518,35 @@ impl Gallery {
                 );
             }
             ComponentId::SegmentedButton => {
+                // SingleChoiceSegmentedButtonRow with full DynamicSpring animations (selection fill, press squish, check scale, label glide)
                 let labels = ["Expressive", "Standard", "Custom"];
-                let sw = w / 3.0;
+                let n = labels.len();
                 let h = 40.0 * u;
+                let press_amt = self.seg_press.x.clamp(0.0, 1.2);
+                let mut weights = [1.0f32; 3];
+                for (i, wt) in weights.iter_mut().enumerate() {
+                    let sel_t = self.seg_anim[i].x.clamp(0.0, 1.2);
+                    *wt += 0.08 * sel_t;
+                }
+                if let Some(pi) = self.seg_pressed_idx {
+                    if press_amt > 0.001 {
+                        weights[pi] += 0.10 * press_amt;
+                    }
+                }
+                let weight_sum: f32 = weights.iter().sum();
+                let mut sx = x;
                 for (i, lb) in labels.into_iter().enumerate() {
-                    let sx = x + i as f32 * sw;
-                    let sel = self.segmented == i;
+                    let sw = w * (weights[i] / weight_sum);
+                    let sel_t = self.seg_anim[i].x.clamp(0.0, 1.0);
                     let end = 20.0 * u;
                     let seg_r = if i == 0 {
                         [end, 0.0, 0.0, end]
-                    } else if i == labels.len() - 1 {
+                    } else if i == n - 1 {
                         [0.0, end, end, 0.0]
                     } else {
                         r4(0.0)
                     };
-                    let fill = if sel {
-                        self.pal.secondary_container
-                    } else {
-                        [0.0; 4]
-                    };
+                    let fill = with_alpha(self.pal.secondary_container, sel_t);
                     ui.rect_styled(
                         sx,
                         y + 4.0 * u,
@@ -4161,32 +4558,36 @@ impl Gallery {
                         seg_r,
                         0.0,
                     );
-                    let ink = if sel {
-                        self.pal.on_secondary_container
-                    } else {
-                        self.pal.text
-                    };
-                    let style = ts(M3_LABEL_LARGE, ink, u);
-                    let ltw = ui.text_width(lb, style.px, style.medium, style.tracking_em);
-                    let icon_w = if sel { 24.0 * u } else { 0.0 };
-                    let start = sx + (sw - ltw - icon_w) * 0.5;
-                    if sel {
-                        icon_c(ui, "check", start + 8.0 * u, y + 24.0 * u, 18.0 * u, ink);
-                    }
-                    ui.text(lb, start + icon_w, y + 24.0 * u - style.line_h * 0.5, style);
                     let rect = Rect {
                         x: sx,
                         y: y + 4.0 * u,
                         w: sw,
                         h,
                     };
+                    // Draw state layer and ripples BEFORE icon and text!
                     self.layer_radii(ui, Action::Segmented(i), rect, seg_r, self.pal.text);
                     self.draw_ripples(ui, rect);
+                    let ink = mix(self.pal.text, self.pal.on_secondary_container, sel_t);
+                    let style = ts(M3_LABEL_LARGE, ink, u);
+                    let ltw = ui.text_width(lb, style.px, style.medium, style.tracking_em);
+                    let icon_w = 22.0 * u * sel_t;
+                    let start = sx + (sw - ltw - icon_w) * 0.5;
+                    if sel_t > 0.08 {
+                        icon_c(
+                            ui,
+                            "check",
+                            start + 8.0 * u,
+                            y + 24.0 * u,
+                            18.0 * u * sel_t,
+                            with_alpha(ink, sel_t),
+                        );
+                    }
+                    ui.text(lb, start + icon_w, y + 24.0 * u - style.line_h * 0.5, style);
                     self.zone(Action::Segmented(i), rect, self.pal.text);
+                    sx += sw;
                 }
             }
             ComponentId::Divider => {
-                // Full-width divider + Inset divider + Subheader divider
                 ui.text(
                     "Full-bleed & Inset Dividers",
                     x,
@@ -4211,7 +4612,6 @@ impl Gallery {
                 );
             }
             ComponentId::PullToRefresh => {
-                // Authentic M3 Expressive PullToRefreshBox: elevated circular container with morphing LoadingIndicator!
                 let cx = x + 32.0 * u;
                 let cy = y + 36.0 * u;
                 ui.circle(cx, cy + 2.0 * u, 24.0 * u, with_alpha(self.pal.bg, 0.65));
@@ -4293,7 +4693,6 @@ impl Gallery {
                 );
             }
             ComponentId::Toolbar => {
-                // M3 Expressive HorizontalFloatingToolbar pill + adjacent 56dp FAB!
                 let icons = ["edit", "palette", "brush", "share", "more_vert"];
                 let tw3 = icons.len() as f32 * 44.0 * u + 16.0 * u;
                 let th = 56.0 * u;
@@ -4348,7 +4747,6 @@ impl Gallery {
                     );
                     self.zone(Action::Button(id), rect, self.pal.on_primary_container);
                 }
-                // Adjacent 56dp Secondary FAB per FloatingToolbarWithFab spec
                 self.fab_styled(
                     ui,
                     Action::Button(49),
