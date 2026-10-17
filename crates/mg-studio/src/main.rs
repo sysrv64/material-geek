@@ -20,7 +20,11 @@ use winit::window::{Window, WindowId};
 /// roughly 96–160 dpi so a modest fixed scale reads far better than the
 /// width-derived phone scaling (see `UiState::density`).
 const STUDIO_DENSITY: f32 = 1.3;
-const STUDIO_LOGICAL_WIDTH_DP: f32 = 70.0 / STUDIO_DENSITY;
+
+/// Initial window size in logical (winit CSS) px: at density 1.3 this maps
+/// to ~923 logical dp wide, past the 840dp adaptive list-detail breakpoint.
+const STUDIO_WINDOW_W_PX: f64 = 1200.0;
+const STUDIO_WINDOW_H_PX: f64 = 800.0;
 
 struct StudioApp {
     app: GalleryApp,
@@ -49,14 +53,8 @@ impl ApplicationHandler for StudioApp {
         let window = match event_loop.create_window(
             Window::default_attributes()
                 .with_title("Material Geek Studio — M3 Expressive")
-                .with_inner_size(LogicalSize::new(
-                    STUDIO_LOGICAL_WIDTH_DP as f64,
-                    (STUDIO_LOGICAL_WIDTH_DP * 0.6) as f64,
-                ))
-                .with_min_inner_size(LogicalSize::new(
-                    560.0 * STUDIO_DENSITY,
-                    460.0 * STUDIO_DENSITY,
-                )),
+                .with_inner_size(LogicalSize::new(STUDIO_WINDOW_W_PX, STUDIO_WINDOW_H_PX))
+                .with_min_inner_size(LogicalSize::new(800.0, 600.0)),
         ) {
             Ok(window) => Arc::new(window),
             Err(err) => {
