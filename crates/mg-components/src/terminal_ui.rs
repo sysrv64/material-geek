@@ -3,13 +3,10 @@
 //! Provides top app bar with session tabs, an extra-keys toolbar, Ghostty customization
 //! studio sheet, and quick actions dialog.
 
-use crate::context::{
-    icon_c, r4, text_c, ts, with_alpha, Rect, UiContext, WidgetId, ZoneKind,
-};
+use crate::context::{icon_c, r4, text_c, ts, with_alpha, Rect, UiContext, WidgetId, ZoneKind};
 use crate::props::{ChipProps, SliderProps};
 use mg_render::{
-    M3_BODY_MEDIUM, M3_LABEL_LARGE, M3_LABEL_MEDIUM, M3_LABEL_SMALL, M3_TITLE_LARGE,
-    M3_TITLE_SMALL,
+    M3_BODY_MEDIUM, M3_LABEL_LARGE, M3_LABEL_MEDIUM, M3_LABEL_SMALL, M3_TITLE_LARGE, M3_TITLE_SMALL,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,7 +118,12 @@ impl<'a> UiContext<'a> {
 
         // Right side action buttons
         // 1. Ghostty Studio button
-        let studio_rect = Rect::new(x + w - 44.0 * u, y + (h - 36.0 * u) * 0.5, 36.0 * u, 36.0 * u);
+        let studio_rect = Rect::new(
+            x + w - 44.0 * u,
+            y + (h - 36.0 * u) * 0.5,
+            36.0 * u,
+            36.0 * u,
+        );
         let sid = WidgetId::from_label("tb_studio");
         self.draw_state_layer(sid, studio_rect, r4(18.0 * u), pal.primary);
         self.draw_ripples(sid, studio_rect);
@@ -134,14 +136,25 @@ impl<'a> UiContext<'a> {
             pal.primary,
         );
         if self
-            .register_zone(sid, studio_rect, pal.primary, ZoneKind::Tap { bounded: true }, false)
+            .register_zone(
+                sid,
+                studio_rect,
+                pal.primary,
+                ZoneKind::Tap { bounded: true },
+                false,
+            )
             .clicked
         {
             action = Some(TerminalTopBarAction::GhosttyStudio);
         }
 
         // 2. Paste / Quick Actions button
-        let paste_rect = Rect::new(x + w - 84.0 * u, y + (h - 36.0 * u) * 0.5, 36.0 * u, 36.0 * u);
+        let paste_rect = Rect::new(
+            x + w - 84.0 * u,
+            y + (h - 36.0 * u) * 0.5,
+            36.0 * u,
+            36.0 * u,
+        );
         let pid = WidgetId::from_label("tb_paste");
         self.draw_state_layer(pid, paste_rect, r4(18.0 * u), pal.primary);
         self.draw_ripples(pid, paste_rect);
@@ -154,7 +167,13 @@ impl<'a> UiContext<'a> {
             pal.primary,
         );
         if self
-            .register_zone(pid, paste_rect, pal.primary, ZoneKind::Tap { bounded: true }, false)
+            .register_zone(
+                pid,
+                paste_rect,
+                pal.primary,
+                ZoneKind::Tap { bounded: true },
+                false,
+            )
             .clicked
         {
             action = Some(TerminalTopBarAction::Paste);
@@ -193,9 +212,9 @@ impl<'a> UiContext<'a> {
         let mut total_tabs_w = 44.0 * u;
         for tab in tabs {
             let style = ts(M3_LABEL_LARGE, pal.text, u);
-            let tw = self
-                .renderer
-                .text_width(&tab.title, style.px, style.medium, style.tracking_em);
+            let tw =
+                self.renderer
+                    .text_width(&tab.title, style.px, style.medium, style.tracking_em);
             let has_close = tabs.len() > 1;
             let tab_w = (tw + 24.0 * u + if has_close { 20.0 * u } else { 0.0 })
                 .min(140.0 * u)
@@ -247,17 +266,32 @@ impl<'a> UiContext<'a> {
                 self.draw_ripples(tid, tab_rect);
 
                 let text_x = tab_rect.x + 12.0 * u;
-                self.renderer.text(&tab.title, text_x, tab_rect.y + 8.0 * u, style);
+                self.renderer
+                    .text(&tab.title, text_x, tab_rect.y + 8.0 * u, style);
 
                 let has_close = tabs.len() > 1;
                 if has_close {
                     let close_x = tab_rect.x + tab_rect.w - 16.0 * u;
                     let close_y = tab_rect.cy();
-                    icon_c(self.renderer, "close", close_x, close_y, 14.0 * u, text_color);
-                    let close_rect = Rect::new(close_x - 10.0 * u, tab_rect.y, 22.0 * u, tab_rect.h);
+                    icon_c(
+                        self.renderer,
+                        "close",
+                        close_x,
+                        close_y,
+                        14.0 * u,
+                        text_color,
+                    );
+                    let close_rect =
+                        Rect::new(close_x - 10.0 * u, tab_rect.y, 22.0 * u, tab_rect.h);
                     let cid = WidgetId::from_label("tb_close").with_index(i);
                     if self
-                        .register_zone(cid, close_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+                        .register_zone(
+                            cid,
+                            close_rect,
+                            pal.text,
+                            ZoneKind::Tap { bounded: true },
+                            true,
+                        )
                         .clicked
                     {
                         action = Some(TerminalTopBarAction::CloseTab(i));
@@ -265,7 +299,13 @@ impl<'a> UiContext<'a> {
                 }
 
                 if self
-                    .register_zone(tid, tab_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+                    .register_zone(
+                        tid,
+                        tab_rect,
+                        pal.text,
+                        ZoneKind::Tap { bounded: true },
+                        true,
+                    )
                     .clicked
                     && action.is_none()
                 {
@@ -282,9 +322,22 @@ impl<'a> UiContext<'a> {
             let aid = WidgetId::from_label("tb_add");
             self.draw_state_layer(aid, add_rect, r4(16.0 * u), pal.primary);
             self.draw_ripples(aid, add_rect);
-            icon_c(self.renderer, "add", add_rect.cx(), add_rect.cy(), 18.0 * u, pal.primary);
+            icon_c(
+                self.renderer,
+                "add",
+                add_rect.cx(),
+                add_rect.cy(),
+                18.0 * u,
+                pal.primary,
+            );
             if self
-                .register_zone(aid, add_rect, pal.primary, ZoneKind::Tap { bounded: true }, true)
+                .register_zone(
+                    aid,
+                    add_rect,
+                    pal.primary,
+                    ZoneKind::Tap { bounded: true },
+                    true,
+                )
                 .clicked
             {
                 action = Some(TerminalTopBarAction::NewTab);
@@ -324,19 +377,84 @@ impl<'a> UiContext<'a> {
         }
 
         let keys = [
-            KeyDef { label: "ESC", icon: None, action: ExtraKeyAction::Esc, is_active: false },
-            KeyDef { label: "TAB", icon: None, action: ExtraKeyAction::Tab, is_active: false },
-            KeyDef { label: "CTRL", icon: None, action: ExtraKeyAction::ToggleCtrl, is_active: ctrl_armed },
-            KeyDef { label: "ALT", icon: None, action: ExtraKeyAction::ToggleAlt, is_active: alt_armed },
-            KeyDef { label: "/", icon: None, action: ExtraKeyAction::Slash, is_active: false },
-            KeyDef { label: "|", icon: None, action: ExtraKeyAction::Pipe, is_active: false },
-            KeyDef { label: "-", icon: None, action: ExtraKeyAction::Minus, is_active: false },
-            KeyDef { label: "~", icon: None, action: ExtraKeyAction::Tilde, is_active: false },
-            KeyDef { label: "", icon: Some("arrow_back"), action: ExtraKeyAction::ArrowLeft, is_active: false },
-            KeyDef { label: "", icon: Some("arrow_downward"), action: ExtraKeyAction::ArrowDown, is_active: false },
-            KeyDef { label: "", icon: Some("arrow_upward"), action: ExtraKeyAction::ArrowUp, is_active: false },
-            KeyDef { label: "", icon: Some("arrow_forward"), action: ExtraKeyAction::ArrowRight, is_active: false },
-            KeyDef { label: "", icon: Some("keyboard"), action: ExtraKeyAction::ToggleKeyboard, is_active: false },
+            KeyDef {
+                label: "ESC",
+                icon: None,
+                action: ExtraKeyAction::Esc,
+                is_active: false,
+            },
+            KeyDef {
+                label: "TAB",
+                icon: None,
+                action: ExtraKeyAction::Tab,
+                is_active: false,
+            },
+            KeyDef {
+                label: "CTRL",
+                icon: None,
+                action: ExtraKeyAction::ToggleCtrl,
+                is_active: ctrl_armed,
+            },
+            KeyDef {
+                label: "ALT",
+                icon: None,
+                action: ExtraKeyAction::ToggleAlt,
+                is_active: alt_armed,
+            },
+            KeyDef {
+                label: "/",
+                icon: None,
+                action: ExtraKeyAction::Slash,
+                is_active: false,
+            },
+            KeyDef {
+                label: "|",
+                icon: None,
+                action: ExtraKeyAction::Pipe,
+                is_active: false,
+            },
+            KeyDef {
+                label: "-",
+                icon: None,
+                action: ExtraKeyAction::Minus,
+                is_active: false,
+            },
+            KeyDef {
+                label: "~",
+                icon: None,
+                action: ExtraKeyAction::Tilde,
+                is_active: false,
+            },
+            KeyDef {
+                label: "",
+                icon: Some("arrow_back"),
+                action: ExtraKeyAction::ArrowLeft,
+                is_active: false,
+            },
+            KeyDef {
+                label: "",
+                icon: Some("arrow_downward"),
+                action: ExtraKeyAction::ArrowDown,
+                is_active: false,
+            },
+            KeyDef {
+                label: "",
+                icon: Some("arrow_upward"),
+                action: ExtraKeyAction::ArrowUp,
+                is_active: false,
+            },
+            KeyDef {
+                label: "",
+                icon: Some("arrow_forward"),
+                action: ExtraKeyAction::ArrowRight,
+                is_active: false,
+            },
+            KeyDef {
+                label: "",
+                icon: Some("keyboard"),
+                action: ExtraKeyAction::ToggleKeyboard,
+                is_active: false,
+            },
         ];
 
         let count = keys.len() as f32;
@@ -364,7 +482,14 @@ impl<'a> UiContext<'a> {
             self.draw_ripples(kid, k_rect);
 
             if let Some(ic) = k.icon {
-                icon_c(self.renderer, ic, k_rect.cx(), k_rect.cy(), 18.0 * u, text_col);
+                icon_c(
+                    self.renderer,
+                    ic,
+                    k_rect.cx(),
+                    k_rect.cy(),
+                    18.0 * u,
+                    text_col,
+                );
             } else {
                 text_c(
                     self.renderer,
@@ -376,7 +501,13 @@ impl<'a> UiContext<'a> {
             }
 
             if self
-                .register_zone(kid, k_rect, text_col, ZoneKind::Tap { bounded: true }, false)
+                .register_zone(
+                    kid,
+                    k_rect,
+                    text_col,
+                    ZoneKind::Tap { bounded: true },
+                    false,
+                )
                 .clicked
             {
                 action = Some(k.action);
@@ -406,11 +537,23 @@ impl<'a> UiContext<'a> {
 
         // Scrim ONLY covers area above the sheet
         let scrim_rect = Rect::new(0.0, 0.0, screen_w, sheet_y);
-        self.renderer
-            .rect(0.0, 0.0, screen_w, sheet_y, with_alpha(pal.scrim, 0.54), r4(0.0));
+        self.renderer.rect(
+            0.0,
+            0.0,
+            screen_w,
+            sheet_y,
+            with_alpha(pal.scrim, 0.54),
+            r4(0.0),
+        );
         let scrim_id = WidgetId::from_label("studio_scrim");
         if self
-            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+            .register_zone(
+                scrim_id,
+                scrim_rect,
+                pal.text,
+                ZoneKind::Tap { bounded: true },
+                true,
+            )
             .clicked
         {
             state.is_open = false;
@@ -422,7 +565,13 @@ impl<'a> UiContext<'a> {
 
         let sheet_rect = Rect::new(0.0, sheet_y, screen_w, sheet_h);
         let sheet_id = WidgetId::from_label("studio_sheet");
-        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, true);
+        let _ = self.register_zone(
+            sheet_id,
+            sheet_rect,
+            pal.text,
+            ZoneKind::Tap { bounded: true },
+            true,
+        );
 
         self.renderer.rect(
             sheet_rect.x,
@@ -464,9 +613,22 @@ impl<'a> UiContext<'a> {
         let cid = WidgetId::from_label("studio_close");
         self.draw_state_layer(cid, close_rect, r4(18.0 * u), pal.sub);
         self.draw_ripples(cid, close_rect);
-        icon_c(self.renderer, "close", close_rect.cx(), close_rect.cy(), 20.0 * u, pal.sub);
+        icon_c(
+            self.renderer,
+            "close",
+            close_rect.cx(),
+            close_rect.cy(),
+            20.0 * u,
+            pal.sub,
+        );
         if self
-            .register_zone(cid, close_rect, pal.sub, ZoneKind::Tap { bounded: true }, true)
+            .register_zone(
+                cid,
+                close_rect,
+                pal.sub,
+                ZoneKind::Tap { bounded: true },
+                true,
+            )
             .clicked
         {
             state.is_open = false;
@@ -515,10 +677,12 @@ impl<'a> UiContext<'a> {
             true,
         );
         if trow_resp.dragged {
-            state.theme_scroll_x = (state.theme_scroll_x + self.frame_delta.0).clamp(min_theme_scroll, 0.0);
+            state.theme_scroll_x =
+                (state.theme_scroll_x + self.frame_delta.0).clamp(min_theme_scroll, 0.0);
         }
 
-        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        self.renderer
+            .push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
         let mut tx = 20.0 * u + state.theme_scroll_x;
         for (i, name) in themes.into_iter().enumerate() {
             let cw = theme_widths[i];
@@ -565,10 +729,12 @@ impl<'a> UiContext<'a> {
             true,
         );
         if srow_resp.dragged {
-            state.shader_scroll_x = (state.shader_scroll_x + self.frame_delta.0).clamp(min_shader_scroll, 0.0);
+            state.shader_scroll_x =
+                (state.shader_scroll_x + self.frame_delta.0).clamp(min_shader_scroll, 0.0);
         }
 
-        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        self.renderer
+            .push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
         let mut sx = 20.0 * u + state.shader_scroll_x;
         for (i, name) in shaders.into_iter().enumerate() {
             let cw = shader_widths[i];
@@ -615,10 +781,12 @@ impl<'a> UiContext<'a> {
             true,
         );
         if styrow_resp.dragged {
-            state.style_scroll_x = (state.style_scroll_x + self.frame_delta.0).clamp(min_style_scroll, 0.0);
+            state.style_scroll_x =
+                (state.style_scroll_x + self.frame_delta.0).clamp(min_style_scroll, 0.0);
         }
 
-        self.renderer.push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
+        self.renderer
+            .push_clip([20.0 * u, cy - 2.0 * u, row_w, 40.0 * u]);
         let mut stx = 20.0 * u + state.style_scroll_x;
         for (i, name) in styles.into_iter().enumerate() {
             let cw = style_widths[i];
@@ -709,11 +877,23 @@ impl<'a> UiContext<'a> {
 
         // Scrim ONLY covers area above the sheet
         let scrim_rect = Rect::new(0.0, 0.0, screen_w, sheet_y);
-        self.renderer
-            .rect(0.0, 0.0, screen_w, sheet_y, with_alpha(pal.scrim, 0.54), r4(0.0));
+        self.renderer.rect(
+            0.0,
+            0.0,
+            screen_w,
+            sheet_y,
+            with_alpha(pal.scrim, 0.54),
+            r4(0.0),
+        );
         let scrim_id = WidgetId::from_label("qa_scrim");
         if self
-            .register_zone(scrim_id, scrim_rect, pal.text, ZoneKind::Tap { bounded: true }, true)
+            .register_zone(
+                scrim_id,
+                scrim_rect,
+                pal.text,
+                ZoneKind::Tap { bounded: true },
+                true,
+            )
             .clicked
         {
             *is_open = false;
@@ -725,7 +905,13 @@ impl<'a> UiContext<'a> {
         // Sheet container
         let sheet_rect = Rect::new(0.0, sheet_y, screen_w, sheet_h);
         let sheet_id = WidgetId::from_label("qa_sheet");
-        let _ = self.register_zone(sheet_id, sheet_rect, pal.text, ZoneKind::Tap { bounded: true }, true);
+        let _ = self.register_zone(
+            sheet_id,
+            sheet_rect,
+            pal.text,
+            ZoneKind::Tap { bounded: true },
+            true,
+        );
 
         self.renderer.rect(
             sheet_rect.x,
@@ -757,9 +943,17 @@ impl<'a> UiContext<'a> {
         let items = [
             ("content_copy", "Copy Selected Text", QuickAction::Copy),
             ("content_paste", "Paste From Clipboard", QuickAction::Paste),
-            ("select_all", "Select All Characters", QuickAction::SelectAll),
+            (
+                "select_all",
+                "Select All Characters",
+                QuickAction::SelectAll,
+            ),
             ("refresh", "Clear Screen Buffer", QuickAction::ClearScreen),
-            ("history", "Reset Terminal Session", QuickAction::ResetTerminal),
+            (
+                "history",
+                "Reset Terminal Session",
+                QuickAction::ResetTerminal,
+            ),
         ];
 
         let mut cy = sheet_y + 68.0 * u;
@@ -772,7 +966,14 @@ impl<'a> UiContext<'a> {
             self.draw_state_layer(rid, row_rect, r4(12.0 * u), pal.text);
             self.draw_ripples(rid, row_rect);
 
-            icon_c(self.renderer, ic, row_rect.x + 20.0 * u, row_rect.cy(), 22.0 * u, pal.primary);
+            icon_c(
+                self.renderer,
+                ic,
+                row_rect.x + 20.0 * u,
+                row_rect.cy(),
+                22.0 * u,
+                pal.primary,
+            );
             self.renderer.text(
                 label,
                 row_rect.x + 48.0 * u,
@@ -781,7 +982,13 @@ impl<'a> UiContext<'a> {
             );
 
             if self
-                .register_zone(rid, row_rect, pal.text, ZoneKind::Tap { bounded: true }, false)
+                .register_zone(
+                    rid,
+                    row_rect,
+                    pal.text,
+                    ZoneKind::Tap { bounded: true },
+                    false,
+                )
                 .clicked
             {
                 action = Some(act);
