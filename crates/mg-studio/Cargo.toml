@@ -1,0 +1,16 @@
+[package]
+name = "mg-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "material-geek PC app: adaptive list-detail catalog at desktop density (separate from the phone runner)"
+repository.workspace = true
+
+[[bin]]
+name = "mg-studio"
+path = "src/main.rs"
+
+[dependencies]
+mg-android = { path = "../mg-android" }
+log = "0.4"
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "x11"] }

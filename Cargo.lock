@@ -959,6 +959,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-desktop"
+version = "0.1.0"
+dependencies = [
+ "mg-android",
+]
+
+[[package]]
 name = "mg-motion"
 version = "0.1.0"
 dependencies = [
@@ -978,6 +985,15 @@ dependencies = [
  "mg-tokens",
  "naga",
  "wgpu",
+]
+
+[[package]]
+name = "mg-studio"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "mg-android",
+ "winit",
 ]
 
 [[package]]

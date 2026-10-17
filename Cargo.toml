@@ -7,6 +7,8 @@ members = [
     "crates/mg-demo",
     "crates/mg-render",
     "crates/mg-android",
+    "crates/mg-desktop",
+    "crates/mg-studio",
 ]
 resolver = "2"
 

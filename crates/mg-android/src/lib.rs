@@ -2,7 +2,7 @@ pub mod gallery;
 
 pub use gallery::{Gallery, GalleryApp};
 use log::{error, info};
-use mg_components::KeyInput;
+pub use mg_components::KeyInput;
 #[cfg(target_os = "android")]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;

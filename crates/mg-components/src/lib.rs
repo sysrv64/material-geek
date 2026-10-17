@@ -22,9 +22,9 @@ pub use context::{
 pub use mg_tokens::elevation::ElevationLevel;
 pub use mg_tokens::shape::{MaterialShape, ShapeStyle};
 pub use props::*;
-pub use terminal_ui::*;
 use serde::{Deserialize, Serialize};
-pub use showcase::{CatalogState, APP_BAR_HEIGHT_DP, STATUS_BAR_INSET_DP};
+pub use showcase::{CatalogState, APP_BAR_HEIGHT_DP, NAV_PANE_WIDTH_DP, STATUS_BAR_INSET_DP};
+pub use terminal_ui::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ComponentId {

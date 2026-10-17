@@ -9,6 +9,8 @@ Built from scratch in Rust with a modular architecture:
 - **`mg-render`**: Real-time `wgpu` WGSL SDF renderer (`RoundedBox`, 64-segment `M3ShapeMorph` across all 35 shapes, `WavyLinear` sinusoidal wave, `WavyCircularArc`) with `fwidth` anti-aliasing, premultiplied alpha blending, pixel-accurate clip stack, and `glyphon` / `cosmic-text` Roboto + Material Symbols rendering.
 - **`mg-components`**: **Complete Material 3 Expressive UI Framework** providing `UiState`, `UiContext`, layout containers (`ColumnLayout`, `RowLayout`), focus & keyboard management, built-in docked M3E `SoftKeyboard` (`ABC`, `123 / Date`, `#+=$`), gesture recognition (`Tap`, `ImmediateDragX`, `SwipeX`, `PullY`, `Dial`), stateful controllers (`DatePickerState`, `TimePickerState`, `TextFieldProps`, `SwipeDismissItem`, `PullRefreshState`), and reusable GPU widget methods for all 41 M3 Expressive components.
 - **`mg-android`**: Thin platform runner (`winit` window/touch/mouse/keyboard/IME event bridge + `wgpu` surface management) hosting the interactive 41-component catalog built on `mg-components`.
+- **`mg-desktop`**: Minimal Linux/desktop/Windows/macOS window runner (`mg-geek` binary) reusing the platform-neutral `mg-android` gallery runner.
+- **`mg-studio`**: Separate **PC application** (`mg-studio` binary) — the 41-component catalog rendered at desktop pixel density in the M3 adaptive list-detail layout (clickable navigation pane + scrollable detail pane), hardware keyboard input, no phone chrome.
 
 Verified against Jetpack Compose `material3:1.5.0-alpha` (`Compose-Material-3-Expressive-Catalog`) and Flutter `material_3_expressive`.
 
@@ -70,8 +72,29 @@ pub fn draw_frame(app: &mut MyAppState, renderer: &mut UiRenderer, width: f32, h
 
 ```bash
 cargo test --workspace
+
+# headless core demo
 cargo run -p mg-demo
+
+# Linux/desktop window (auto-scaled catalog)
+cargo run -p mg-desktop
+
+# PC app: adaptive list-detail catalog at desktop density
+cargo run -p mg-studio
 ```
+
+## Cross-platform (multiplatform) support
+
+The component stack (`mg-tokens`/`mg-motion`/`mg-theme`/`mg-render`/`mg-components`) is
+form-factor neutral; `UiState` exposes:
+
+- `density`: fixed px/dp scale override (`0.0` = width-derived, phone behavior) — desktop windows run at a desktop-appropriate scale instead of the phone width scaling.
+- `soft_keyboard`: disables the docked M3E soft keyboard on hardware-keyboard form factors while keeping the same `focus()`/`push_key()` text-input path.
+- `top_inset_dp`: phone status-bar inset override (desktop runners set `0.0`).
+- `is_paned_layout()`: M3 adaptive breakpoint (`>= 840dp`) switching the catalog between the compact single-column phone layout and the list-detail navigation-pane layout.
+
+Android (`NativeActivity`) and phone behavior are unchanged; desktop runners
+(`mg-desktop`, `mg-studio`) configure the above and add an independent `winit` app process.
 
 ## License
 
