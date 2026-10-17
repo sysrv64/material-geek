@@ -17,6 +17,9 @@ use mg_render::{
 pub const STATUS_BAR_INSET_DP: f32 = 38.0;
 pub const APP_BAR_HEIGHT_DP: f32 = 64.0;
 
+/// Width of the navigation pane of the adaptive list-detail layout, in dp.
+pub const NAV_PANE_WIDTH_DP: f32 = 300.0;
+
 /// Complete interactive state for the 41-component Material 3 Expressive Catalog built on the Material Geek UI Framework.
 pub struct CatalogState {
     pub app_search_open: bool,
@@ -345,14 +348,73 @@ impl<'a> UiContext<'a> {
         }
     }
 
+    /// Scroll slot offset (in px, at the given density) of component `slot`,
+    /// i.e. the distance from the top of the catalog list to the card top.
+    fn slot_offset(slot: usize, cat: &CatalogState, u: f32) -> f32 {
+        let mut off = 0.0;
+        for (i, id) in ComponentId::ALL.iter().enumerate() {
+            if i == slot {
+                break;
+            }
+            off += (24.0 + 32.0 + Self::body_height(*id, cat, u) + 20.0) * u;
+        }
+        off
+    }
+
+    /// Adaptive layout router: the phone-style single-column catalog stays
+    /// untouched; on wide viewports the M3 adaptive list-detail layout is
+    /// used (navigation pane + scrollable detail pane).
     pub fn draw_catalog(&mut self, cat: &mut CatalogState) {
+        if self.state.is_paned_layout() {
+            self.draw_catalog_paned(cat);
+        } else {
+            self.draw_catalog_column(cat);
+        }
+    }
+
+    /// Compact single-column catalog (phone behavior, unchanged).
+    fn draw_catalog_column(&mut self, cat: &mut CatalogState) {
         let u = self.u();
         let width = self.state.width;
         let pad = 16.0 * u;
         let card_x = 8.0 * u;
         let card_w = width - 16.0 * u;
         let search_extra = if cat.app_search_open { 64.0 * u } else { 0.0 };
-        let top_total = (STATUS_BAR_INSET_DP + APP_BAR_HEIGHT_DP) * u + search_extra;
+        let top_total = (self.state.top_inset_dp + APP_BAR_HEIGHT_DP) * u + search_extra;
+        self.draw_component_list(cat, card_x, card_w, pad, top_total);
+        self.draw_catalog_app_bar(width, cat);
+        self.finish_frame();
+    }
+
+    /// Adaptive list-detail catalog: fixed navigation pane on the left,
+    /// scrollable detail pane with the full component card list on the right.
+    fn draw_catalog_paned(&mut self, cat: &mut CatalogState) {
+        let u = self.u();
+        let width = self.state.width;
+        let nav_w = NAV_PANE_WIDTH_DP * u;
+        let gap = 12.0 * u;
+        let card_x = nav_w + gap;
+        let card_w = width - card_x - 16.0 * u;
+        let pad = 16.0 * u;
+        let search_extra = if cat.app_search_open { 64.0 * u } else { 0.0 };
+        let top_total = (self.state.top_inset_dp + APP_BAR_HEIGHT_DP) * u + search_extra;
+        self.draw_component_list(cat, card_x, card_w, pad, top_total);
+        self.draw_nav_pane(cat, nav_w, top_total);
+        self.draw_catalog_app_bar(width, cat);
+        self.finish_frame();
+    }
+
+    /// Scrollable card list used by both adaptive layouts (detail pane or
+    /// full width on compact form factors). Draws the list body only.
+    fn draw_component_list(
+        &mut self,
+        cat: &mut CatalogState,
+        card_x: f32,
+        card_w: f32,
+        pad: f32,
+        top_total: f32,
+    ) {
+        let u = self.u();
         let mut y = top_total + 14.0 * u - self.state.scroll;
         let filter_q = cat.app_search_field.text.trim().to_ascii_lowercase();
 
@@ -399,13 +461,84 @@ impl<'a> UiContext<'a> {
         }
         self.state.content_h = y + self.state.scroll + 24.0 * u;
         self.state.scroll_by(0.0);
-        self.draw_catalog_app_bar(width, cat);
-        self.finish_frame();
+    }
+
+    /// Left navigation pane of the adaptive layout: clickable jump rows for
+    /// all 41 catalog components with pane-local scroll and hover feedback.
+    fn draw_nav_pane(&mut self, cat: &mut CatalogState, nav_w: f32, top_total: f32) {
+        let u = self.u();
+        let height = self.state.height;
+        let pal = self.state.pal.clone();
+        let pane_bg = pal.card;
+        let row_h = 44.0 * u;
+
+        // Floor of the visible pane area.
+        let pane_top = top_total + 10.0 * u;
+        let pane_bottom = height - 10.0 * u;
+        let pane_h = (pane_bottom - pane_top).max(0.0);
+        self.renderer.rect(0.0, pane_top, nav_w, pane_h, pane_bg, r4(20.0 * u));
+
+        let visible = (pane_h / row_h).floor();
+        let rows = ComponentId::ALL.len() as f32;
+        let max = (rows - visible).max(0.0) * row_h;
+        self.state.nav_scroll = self.state.nav_scroll.clamp(0.0, max);
+        let first = (self.state.nav_scroll / row_h).floor() as usize;
+        let visible_rows = (visible + 2.0) as usize;
+
+        let filter_q = cat.app_search_field.text.trim().to_ascii_lowercase();
+        for (idx, id) in ComponentId::ALL.iter().enumerate() {
+            if idx < first || idx >= first + visible_rows {
+                continue;
+            }
+            if !filter_q.is_empty()
+                && !Self::component_title(*id)
+                    .to_ascii_lowercase()
+                    .contains(&filter_q)
+            {
+                continue;
+            }
+            let title = Self::component_title(*id);
+            let row_x = 10.0 * u;
+            let row_w = nav_w - 20.0 * u;
+            let row_y =
+                pane_top + 6.0 * u + (idx as f32) * row_h - self.state.nav_scroll;
+            if row_y < pane_top || row_y + row_h > pane_bottom {
+                continue;
+            }
+            let nav_id = WidgetId::from_label("nav_row_index").with_index(idx);
+            let is_down = self.is_pressed(nav_id);
+            self.draw_state_layer(nav_id, Rect::new(row_x, row_y, row_w, row_h), r4(28.0 * u), pal.primary);
+            self.renderer.push_clip([row_x, pane_top, row_w, pane_h]);
+            self.renderer.text(
+                title,
+                row_x + 18.0 * u,
+                row_y + (row_h - 14.0 * u) / 2.0,
+                ts(
+                    M3_LABEL_LARGE,
+                    if is_down { pal.primary } else { pal.text },
+                    u,
+                ),
+            );
+            self.renderer.pop_clip();
+            let slot_off = Self::slot_offset(idx, cat, u);
+            let target = (14.0 * u + slot_off - 8.0 * u).max(0.0);
+            let respond = self.register_zone(
+                nav_id,
+                Rect::new(row_x, row_y, row_w, row_h),
+                pal.primary,
+                ZoneKind::Tap { bounded: true },
+                false,
+            );
+            if respond.clicked {
+                let max_scroll = (self.state.content_h - self.state.height).max(0.0);
+                self.state.scroll = target.min(max_scroll);
+            }
+        }
     }
 
     fn draw_catalog_app_bar(&mut self, width: f32, cat: &mut CatalogState) {
         let u = self.u();
-        let top_inset = STATUS_BAR_INSET_DP * u;
+        let top_inset = self.state.top_inset_dp * u;
         let bar_h = APP_BAR_HEIGHT_DP * u;
         let extra_h = if cat.app_search_open { 64.0 * u } else { 0.0 };
         let total_h = top_inset + bar_h + extra_h;

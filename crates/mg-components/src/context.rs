@@ -1,4 +1,5 @@
 use crate::props::TextFieldProps;
+use crate::{ComponentId, NAV_PANE_WIDTH_DP, STATUS_BAR_INSET_DP};
 use mg_motion::{cubic_bezier_y, DynamicSpring, Tempo, Track};
 use mg_render::{
     m3_text_style, MaterialShape, TextStyle, TypeStyle, UiRenderer, M3_LABEL_LARGE,
@@ -319,6 +320,14 @@ pub struct UiState {
     pub t: f32,
     pub scroll: f32,
     pub content_h: f32,
+    /// Fixed device pixel density override (0.0 = derive from window width, phone behavior).
+    pub density: f32,
+    /// Top system-bar inset in dp (phone status bar; desktop runners set 0.0).
+    pub top_inset_dp: f32,
+    /// Whether the built-in on-screen soft keyboard is allowed (touch form factors only).
+    pub soft_keyboard: bool,
+    /// Scroll offset of the desktop navigation pane (two-pane layout).
+    pub nav_scroll: f32,
     pub width: f32,
     pub height: f32,
     pub pointer: (f32, f32),
@@ -356,6 +365,10 @@ impl UiState {
             t: 0.0,
             scroll: 0.0,
             content_h: 4000.0,
+            density: 0.0,
+            top_inset_dp: STATUS_BAR_INSET_DP,
+            soft_keyboard: true,
+            nav_scroll: 0.0,
             width: 412.0,
             height: 892.0,
             pointer: (0.0, 0.0),
@@ -379,8 +392,44 @@ impl UiState {
         }
     }
 
+    /// Effective device pixel density in px/dp. Desktop runners set [`Self::density`]
+    /// explicitly; phone form factors keep the width-derived value.
     pub fn u(&self) -> f32 {
-        (self.width / 412.0).clamp(0.75, 3.5)
+        if self.density > 0.0 {
+            self.density.clamp(0.75, 3.5)
+        } else {
+            (self.width / 412.0).clamp(0.75, 3.5)
+        }
+    }
+
+    /// Width class of the current viewport in logical dp vs the M3 adaptive
+    /// breakpoints (Compact < 600 <= Medium, Expanded >= 840).
+    pub fn logical_width_dp(&self) -> f32 {
+        self.width / self.u()
+    }
+
+    /// True when the viewport is wide enough for the list-detail
+    /// (navigation pane + detail) adaptive layout.
+    pub fn is_paned_layout(&self) -> bool {
+        self.logical_width_dp() >= 840.0
+    }
+
+    /// Mouse/trackpad wheel scrolling, routed to the hovered pane when the
+    /// adaptive two-pane layout is active, otherwise to the main scroll.
+    pub fn scroll_wheel(&mut self, dy: f32) {
+        if self.is_paned_layout() {
+            let nav_w = NAV_PANE_WIDTH_DP * self.u();
+            if self.pointer.0 < nav_w {
+                let u = self.u();
+                let row_h = 44.0 * u;
+                let pane_h = self.height - (self.top_inset_dp + 64.0) * u - 20.0 * u;
+                let rows = ComponentId::ALL.len() as f32 * row_h;
+                let max = (rows - pane_h).max(0.0);
+                self.nav_scroll = (self.nav_scroll + dy).clamp(0.0, max);
+                return;
+            }
+        }
+        self.scroll_by(dy);
     }
 
     pub fn toggle_dark_mode(&mut self) {
@@ -400,7 +449,9 @@ impl UiState {
 
     pub fn focus(&mut self, id: impl Into<WidgetId>, mode: SoftKeyboardMode) {
         self.focus_id = Some(id.into());
-        self.soft_kb_open = true;
+        if self.soft_keyboard {
+            self.soft_kb_open = true;
+        }
         self.soft_kb_mode = mode;
     }
 

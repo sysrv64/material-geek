@@ -247,7 +247,17 @@ impl GalleryApp {
     }
 
     pub fn scroll(&mut self, dy: f32) {
-        self.gallery.scroll_by(dy);
+        self.gallery.state.scroll_wheel(dy);
+    }
+
+    /// Read-only access to the gallery UI state (form-factor configuration).
+    pub fn gallery(&self) -> &Gallery {
+        &self.gallery
+    }
+
+    /// Mutable access to the gallery UI state (form-factor configuration).
+    pub fn gallery_mut(&mut self) -> &mut Gallery {
+        &mut self.gallery
     }
 
     pub fn pointer_down(&mut self, x: f32, y: f32) {
